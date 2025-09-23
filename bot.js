@@ -17,7 +17,7 @@ import { Client, GatewayIntentBits } from "discord.js";
 import OpenAI from "openai";
 import cron from "node-cron";
 import axios from "axios";
-import cheerio from "cheerio";
+import * as cheerio from "cheerio"; // <-- ESM-safe import
 import instagramScraper from "instagram-scraping";
 
 // ------------------ Debug Env Variables ------------------
@@ -99,7 +99,6 @@ async function getOpenAIResponse(prompt) {
 
 async function getHealthNews() {
   if (!process.env.NEWS_API_KEY) return "No News API key provided.";
-
   try {
     const res = await axios.get(
       `https://newsapi.org/v2/top-headlines?category=health&language=en&apiKey=${process.env.NEWS_API_KEY}`
