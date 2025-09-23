@@ -1,3 +1,17 @@
-.env
+# Node modules
 node_modules/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+
+# Memory files
 memory.json
+conversationmemory.json
+
+# Package lock (optional if you want Railway to rebuild)
+package-lock.json
