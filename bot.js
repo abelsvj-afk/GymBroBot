@@ -49,7 +49,6 @@ let memory = {};
 if (fs.existsSync(MEMORY_FILE)) {
   memory = JSON.parse(fs.readFileSync(MEMORY_FILE));
 }
-
 function saveMemory() {
   fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2));
 }
@@ -60,14 +59,12 @@ let birthdays = {};
 if (fs.existsSync(BIRTHDAY_FILE)) {
   birthdays = JSON.parse(fs.readFileSync(BIRTHDAY_FILE));
 }
-
 function saveBirthdays() {
   fs.writeFileSync(BIRTHDAY_FILE, JSON.stringify(birthdays, null, 2));
 }
 
 // ------------------ Instagram Influencers ------------------
 const instagramInfluencers = ["iamchriskabeya", "arturkramer", "magno_scavo"];
-
 async function getLiveInstagramPost(username) {
   try {
     const posts = await instagramScraper.scrapeUserPage(username);
@@ -159,19 +156,47 @@ async function getBoxRecEvents() {
   }
 }
 
-// ------------------ Bot Ready ------------------
-client.once("ready", () => {
+// ------------------ Bot Ready with Pinned How-To ------------------
+client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}!`);
 
-  // Daily motivational check-in at 7 AM
+  // ------------------ Pinned How-To Messages ------------------
+  const howToMessages = {
+    general: "💡 **Welcome to General!** Chat freely. To get started, you can ask the bot questions or interact in other channels. For birthdays, type `setbirthday MM-DD` (e.g., `setbirthday 09-23`) to save your birthday. The bot will automatically remind everyone on your birthday!",
+    welcome: "💡 **Welcome Channel:** Introduce yourself here and get guidance on the server.",
+    announcements: "💡 **Announcements:** Important updates and server news will be posted here. Stay tuned!",
+    "daily-check-ins": "💡 **Daily Check-Ins:** Post your workouts or motivational updates. Example: `Did a 30-min run today!`",
+    "tips and guide": "💡 **Tips & Guide:** Ask for guidance on fitness, health, style, faith, or wealth. The bot will respond contextually.",
+    faith: "💡 **Faith Channel:** Ask questions about Christianity, God, Jesus Christ, and the Holy Spirit. Example: `How can I strengthen my prayer life?`",
+    "mens-style": "💡 **Men's Style:** Ask about fashion, outfits, or style tips. Example: `How should I style a casual outfit for fall?`",
+    "open-up": "💡 **Open Up:** Share personal struggles or mental health concerns. Example: `I’m feeling stressed about work.`",
+    health: "💡 **Health:** Ask about wellness, diet, natural remedies, family health, or superfoods. Example: `What are the best exercises for back pain?`",
+    wealth: "💡 **Wealth:** Ask about investing, business, stocks, crypto, or financial growth. Example: `What’s a smart first step for investing in stocks?`",
+    sports: "💡 **Sports:** Ask about MMA, boxing, Muay Thai, or combat sports events. Example: `Who’s fighting in the UFC this weekend?`"
+  };
+
+  for (const [channelName, message] of Object.entries(howToMessages)) {
+    const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === channelName);
+    if (!channel) continue;
+    try {
+      const pinned = await channel.messages.fetchPinned();
+      if (!pinned.some(msg => msg.content === message)) {
+        const sent = await channel.send(message);
+        await sent.pin();
+      }
+    } catch (err) {
+      console.error(`Error pinning message in #${channelName}:`, err.message);
+    }
+  }
+
+  // ------------------ Cron Jobs ------------------
   cron.schedule("0 7 * * *", async () => {
-    const channel = client.channels.cache.find(ch => ch.name === "daily-check-in");
+    const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "daily-check-ins");
     if (channel) await channel.send("💪 Rise and grind! Time for your workout check-in!");
   });
 
-  // Daily wealth tip at 9 AM
   cron.schedule("0 9 * * *", async () => {
-    const channel = client.channels.cache.find(ch => ch.name === "wealth");
+    const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "wealth");
     if (channel) {
       const tip = await getOpenAIResponse(
         "Provide a practical daily wealth tip for investing, business, money management, stocks, crypto, life insurance, entrepreneurship, leveraging debt, LLCs, banking, and financial growth."
@@ -180,38 +205,31 @@ client.once("ready", () => {
     }
   });
 
-  // Daily health news at 10 AM
   cron.schedule("0 10 * * *", async () => {
-    const channel = client.channels.cache.find(ch => ch.name === "health");
+    const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "health");
     if (channel) {
       const news = await getHealthNews();
       await channel.send(`🏥 Daily Health News:\n${news}`);
     }
   });
 
-  // Combat sports updates multiple times per day (8AM, 12PM, 4PM)
   const fightTimes = ["0 8 * * *", "0 12 * * *", "0 16 * * *"];
   fightTimes.forEach(cronTime => {
     cron.schedule(cronTime, async () => {
-      const channel = client.channels.cache.find(ch => ch.name === "sports");
+      const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "sports");
       if (!channel) return;
-
       const mma = await getSherdogEvents();
       const fightNews = await getFightNews();
       const boxing = await getBoxRecEvents();
-
       channel.send(`🥊 Combat Sports Update:\nMMA: ${mma}\nFightNews: ${fightNews}\nBoxing: ${boxing}`);
     });
   });
 
-  // Birthday check at 8 AM
   cron.schedule("0 8 * * *", async () => {
-    const channel = client.channels.cache.find(ch => ch.name === "general");
+    const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "general");
     if (!channel) return;
-
     const today = new Date();
     const todayMonthDay = `${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-
     for (const [userID, date] of Object.entries(birthdays)) {
       const birthMonthDay = date.slice(5); // MM-DD
       if (birthMonthDay === todayMonthDay) {
