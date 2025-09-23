@@ -16,7 +16,8 @@ const { Client, GatewayIntentBits } = require("discord.js");
 const OpenAI = require("openai");
 const cron = require("node-cron");
 const axios = require("axios");
-const instagramScraper = require("instagram-scraping"); // Added for live scraping
+const cheerio = require("cheerio");
+const instagramScraper = require("instagram-scraping");
 
 // ------------------ Debug Env Variables ------------------
 console.log("DISCORD_TOKEN:", process.env.DISCORD_TOKEN ? "✅ Exists" : "❌ Missing");
@@ -50,6 +51,17 @@ if (fs.existsSync(MEMORY_FILE)) {
 
 function saveMemory() {
   fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2));
+}
+
+// ------------------ Birthday Tracking ------------------
+const BIRTHDAY_FILE = "./birthdays.json";
+let birthdays = {};
+if (fs.existsSync(BIRTHDAY_FILE)) {
+  birthdays = JSON.parse(fs.readFileSync(BIRTHDAY_FILE));
+}
+
+function saveBirthdays() {
+  fs.writeFileSync(BIRTHDAY_FILE, JSON.stringify(birthdays, null, 2));
 }
 
 // ------------------ Instagram Influencers ------------------
@@ -101,6 +113,52 @@ async function getHealthNews() {
   }
 }
 
+// ------------------ Combat Sports Helper Functions ------------------
+async function getSherdogEvents() {
+  try {
+    const res = await axios.get("https://www.sherdog.com/events/upcoming");
+    const $ = cheerio.load(res.data);
+    const events = [];
+    $(".event-title").each((i, el) => {
+      events.push($(el).text().trim());
+    });
+    return events.slice(0, 5).join(" | ") || "No upcoming Sherdog events found.";
+  } catch (err) {
+    console.error("Sherdog Error:", err.message);
+    return "Could not fetch Sherdog events.";
+  }
+}
+
+async function getFightNews() {
+  try {
+    const res = await axios.get("https://www.fightnews.com/");
+    const $ = cheerio.load(res.data);
+    const headlines = [];
+    $(".headline").each((i, el) => {
+      headlines.push($(el).text().trim());
+    });
+    return headlines.slice(0, 5).join(" | ") || "No FightNews updates found.";
+  } catch (err) {
+    console.error("FightNews Error:", err.message);
+    return "Could not fetch FightNews updates.";
+  }
+}
+
+async function getBoxRecEvents() {
+  try {
+    const res = await axios.get("https://boxrec.com/en/events");
+    const $ = cheerio.load(res.data);
+    const events = [];
+    $("table.events tr td.event-name").each((i, el) => {
+      events.push($(el).text().trim());
+    });
+    return events.slice(0, 5).join(" | ") || "No BoxRec events found.";
+  } catch (err) {
+    console.error("BoxRec Error:", err.message);
+    return "Could not fetch BoxRec events.";
+  }
+}
+
 // ------------------ Bot Ready ------------------
 client.once("ready", () => {
   console.log(`Logged in as ${client.user.tag}!`);
@@ -130,6 +188,37 @@ client.once("ready", () => {
       await channel.send(`🏥 Daily Health News:\n${news}`);
     }
   });
+
+  // Combat sports updates multiple times per day (8AM, 12PM, 4PM)
+  const fightTimes = ["0 8 * * *", "0 12 * * *", "0 16 * * *"];
+  fightTimes.forEach(cronTime => {
+    cron.schedule(cronTime, async () => {
+      const channel = client.channels.cache.find(ch => ch.name === "sports");
+      if (!channel) return;
+
+      const mma = await getSherdogEvents();
+      const fightNews = await getFightNews();
+      const boxing = await getBoxRecEvents();
+
+      channel.send(`🥊 Combat Sports Update:\nMMA: ${mma}\nFightNews: ${fightNews}\nBoxing: ${boxing}`);
+    });
+  });
+
+  // Birthday check at 8 AM
+  cron.schedule("0 8 * * *", async () => {
+    const channel = client.channels.cache.find(ch => ch.name === "general");
+    if (!channel) return;
+
+    const today = new Date();
+    const todayMonthDay = `${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+
+    for (const [userID, date] of Object.entries(birthdays)) {
+      const birthMonthDay = date.slice(5); // MM-DD
+      if (birthMonthDay === todayMonthDay) {
+        channel.send(`🎉 Today is <@${userID}>'s birthday! Go shout them a happy birthday! 💪`);
+      }
+    }
+  });
 });
 
 // ------------------ Message Handling ------------------
@@ -146,45 +235,45 @@ client.on("messageCreate", async message => {
 
   let prompt = "";
 
+  // ------------------ Birthday Command ------------------
+  const args = message.content.split(" ");
+  if (args[0] === "setbirthday") {
+    const date = args[1]; // Expect MM-DD
+    if (!date || !/^\d{2}-\d{2}$/.test(date)) {
+      return message.reply("Please provide your birthday in MM-DD format, e.g., `setbirthday 09-23`");
+    }
+    birthdays[user] = `${new Date().getFullYear()}-${date}`;
+    saveBirthdays();
+    return message.reply(`Got it! Your birthday has been saved as ${date}. 🎉`);
+  }
+
+  // ------------------ Channel-specific prompts ------------------
   switch (channel) {
     case "faith":
-      prompt = `You are a Christian advisor. Respond ONLY about Christianity, God, Jesus Christ, and the Holy Spirit. Use context from previous messages: ${memory[channel][user].join(
-        " | "
-      )}. Latest: "${message.content}"`;
+      prompt = `You are a Christian advisor. Respond ONLY about Christianity, God, Jesus Christ, and the Holy Spirit. Use context from previous messages: ${memory[channel][user].join(" | ")}. Latest: "${message.content}"`;
       break;
     case "wealth":
-      prompt = `You are a financial advisor. Respond to all questions about investing, business, money management, stocks, crypto, life insurance, entrepreneurship, leveraging debt, LLCs, banking, and financial growth. Use context from previous messages: ${memory[channel][user].join(
-        " | "
-      )}. Latest: "${message.content}"`;
+      prompt = `You are a financial advisor. Respond to all questions about investing, business, money management, stocks, crypto, life insurance, entrepreneurship, leveraging debt, LLCs, banking, and financial growth. Use context from previous messages: ${memory[channel][user].join(" | ")}. Latest: "${message.content}"`;
       break;
     case "health":
-      prompt = `You are a health advisor. Answer questions about wellness, diet, natural remedies, family and kids health, political health news, and superfoods. Use context from previous messages: ${memory[channel][user].join(
-        " | "
-      )}. Latest: "${message.content}"`;
+      prompt = `You are a health advisor. Answer questions about wellness, diet, natural remedies, family and kids health, political health news, and superfoods. Use context from previous messages: ${memory[channel][user].join(" | ")}. Latest: "${message.content}"`;
       break;
     case "daily-check-in":
       prompt = `You are a motivational gym bro. Respond positively and encourage the user to take action. Latest: "${message.content}"`;
       break;
     case "mens-style":
-      // Fetch live Instagram posts
-      const influencerPosts = await Promise.all(
-        instagramInfluencers.map(i => getLiveInstagramPost(i))
-      );
-      prompt = `You are a men's style advisor. Base your response on the user's message and the Instagram caption of the selected influencer posts (ignore irrelevant hashtags). Use context from previous messages: ${memory[channel][user].join(
-        " | "
-      )}. Latest: "${message.content}". Influencer posts: ${influencerPosts.join(" | ")}`;
+      const influencerPosts = await Promise.all(instagramInfluencers.map(i => getLiveInstagramPost(i)));
+      prompt = `You are a men's style advisor. Base your response on the user's message and the Instagram caption of the selected influencer posts (ignore irrelevant hashtags). Use context from previous messages: ${memory[channel][user].join(" | ")}. Latest: "${message.content}". Influencer posts: ${influencerPosts.join(" | ")}`;
       break;
     case "open-up":
-      // Multi-user context: combine recent messages from all users in this channel
       const recentMessages = Object.values(memory[channel]).flat().slice(-50);
-      prompt = `You are a supportive advisor. Help users in the 'open-up' channel talk about personal struggles. Consider recent messages for context: ${recentMessages.join(
-        " | "
-      )}. Latest: "${message.content}"`;
+      prompt = `You are a supportive advisor. Help users in the 'open-up' channel talk about personal struggles. Consider recent messages for context: ${recentMessages.join(" | ")}. Latest: "${message.content}"`;
       break;
     case "sports":
-      prompt = `You are a sports analyst. Focus on combat sports (boxing, MMA, Muay Thai) and sprinkle in football/basketball updates. Consider recent messages for context: ${memory[channel][user].join(
-        " | "
-      )}. Latest: "${message.content}"`;
+      const mma = await getSherdogEvents();
+      const fightNews = await getFightNews();
+      const boxing = await getBoxRecEvents();
+      prompt = `You are a sports analyst. Focus on combat sports (boxing, MMA, Muay Thai) and sprinkle in football/basketball updates. Use recent news:\nMMA: ${mma}\nFightNews: ${fightNews}\nBoxing: ${boxing}\nUser question: "${message.content}"`;
       break;
     default:
       prompt = `You are a friendly assistant. Respond contextually to the user. Latest: "${message.content}"`;
