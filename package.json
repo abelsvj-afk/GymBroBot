@@ -1,12 +1,13 @@
 {
   "name": "GymBotBro",
   "version": "1.0.0",
+  "type": "module",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": "20.x"
   },
   "dependencies": {
     "axios": "^1.12.2",
