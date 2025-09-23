@@ -1,23 +1,24 @@
 // ------------------ Express Keep-Alive Server ------------------
-const express = require("express");
+import express from "express";
 const app = express();
 
 app.get("/", (req, res) => res.send("GymBotBro is alive!"));
 app.listen(process.env.PORT || 3000, () => console.log("Server running"));
 
 // ------------------ Load Env Variables ------------------
+import dotenv from "dotenv";
 if (process.env.NODE_ENV !== "production") {
-  require("dotenv").config();
+  dotenv.config();
 }
 
 // ------------------ Required Modules ------------------
-const fs = require("fs");
-const { Client, GatewayIntentBits } = require("discord.js");
-const OpenAI = require("openai");
-const cron = require("node-cron");
-const axios = require("axios");
-const cheerio = require("cheerio");
-const instagramScraper = require("instagram-scraping");
+import fs from "fs";
+import { Client, GatewayIntentBits } from "discord.js";
+import OpenAI from "openai";
+import cron from "node-cron";
+import axios from "axios";
+import cheerio from "cheerio";
+import instagramScraper from "instagram-scraping";
 
 // ------------------ Debug Env Variables ------------------
 console.log("DISCORD_TOKEN:", process.env.DISCORD_TOKEN ? "✅ Exists" : "❌ Missing");
