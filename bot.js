@@ -299,7 +299,6 @@ client.once("ready", async () => {
     for (const uid in fitnessMonthly) fitnessMonthly[uid] = { yes: 0, no: 0 };
     saveMonthly();
   });
-
 });
 
 // ------------------ Message Handling ------------------
@@ -311,6 +310,7 @@ client.on("messageCreate", async message => {
   if (!memory[channel]) memory[channel] = {};
   if (!memory[channel][user]) memory[channel][user] = [];
   memory[channel][user].push(message.content);
+  saveMemory();
 
   // ------------------ Quick Test Command ------------------
   if (message.content === "!test") {
@@ -355,10 +355,72 @@ client.on("messageCreate", async message => {
     updateLeaderboard();
   }
 
-  // OpenAI Response
+  // ------------------ OpenAI Response with Personality ------------------
   if (["tips and guide", "wealth", "health", "faith", "fitness"].includes(channel)) {
-    const response = await getOpenAIResponse(message.content);
-    message.reply(response);
+    const userMemory = {
+      lastMessage: message.content,
+      previousMessages: memory[channel][user]?.slice(-5) || []
+    };
+
+    const personaPrompt = () => {
+      const basePersona = `
+You are GymBotBro, a disciplined, stoic, God-fearing mentor with military-level strength and a strategic mindset.
+Always give advice with authority, clarity, and motivation.
+`;
+
+      let channelTraits = "";
+      switch (channel) {
+        case "faith":
+          channelTraits = `
+Encourage the user spiritually, provide prayerful guidance, and reinforce Christian faith.
+Include Bible references, practical advice for daily struggles, and empathetic encouragement.
+Speak with warmth and conviction, making the user feel personally supported and guided by God.
+`;
+          break;
+        case "wealth":
+          channelTraits = `
+Provide strategic financial guidance, investment insight, and entrepreneurial motivation.
+Focus on actionable steps and discipline in building wealth.
+`;
+          break;
+        case "health":
+          channelTraits = `
+Offer disciplined health, wellness, and lifestyle advice to improve daily habits.
+Encourage consistency, nutrition, and mental well-being.
+`;
+          break;
+        case "fitness":
+          channelTraits = `
+Encourage consistent workouts, celebrate progress, and push resilience and discipline.
+Provide actionable fitness tips and maintain motivation.
+`;
+          break;
+        case "tips and guide":
+          channelTraits = `
+Provide tactical advice, life hacks, and motivational guidance tailored to real-life challenges.
+Focus on clarity and practical steps the user can implement immediately.
+`;
+          break;
+        default:
+          channelTraits = `
+Respond with authority, clarity, and actionable advice.
+`;
+      }
+
+      const context = userMemory.previousMessages.length
+        ? `Consider the user's previous messages for context: ${userMemory.previousMessages.join(" | ")}`
+        : "";
+
+      return `${basePersona}\n${channelTraits}\n${context}\nUser message: "${userMemory.lastMessage}"\nRespond concisely, authoritatively, motivatingly, and for faith, make it warm, empathetic, and scripture-based.`;
+    };
+
+    try {
+      const response = await getOpenAIResponse(personaPrompt());
+      return message.reply(response);
+    } catch (err) {
+      console.error("OpenAI Response Error:", err);
+      return message.reply("❌ Something went wrong while generating a response.");
+    }
   }
 });
 
