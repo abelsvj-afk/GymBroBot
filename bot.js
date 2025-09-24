@@ -126,7 +126,6 @@ async function getHealthNews() {
   }
 }
 
-// ------------------ Combat Sports ------------------
 async function getSherdogEvents() {
   try {
     const res = await axios.get("https://www.sherdog.com/events/upcoming");
@@ -155,6 +154,22 @@ async function getBoxRecEvents() {
     $("table.events tr td.event-name").each((i, el) => events.push($(el).text().trim()));
     return events.slice(0, 5).join(" | ") || "No BoxRec events found.";
   } catch (err) { console.error("BoxRec Error:", err.message); return "Could not fetch BoxRec events."; }
+}
+
+// ------------------ Update Leaderboard ------------------
+function updateLeaderboard() {
+  const leaderboardChannel = client.channels.cache.find(ch => ch.name.toLowerCase() === "leaderboard");
+  if (!leaderboardChannel) return;
+  let leaderboardMsg = "**🏆 Fitness Leaderboard (Daily Updated) 🏆**\n\n";
+  const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
+  sorted.forEach(([uid, data], idx) => {
+    const medals = ["🥇", "🥈", "🥉"];
+    const flair = idx < 3 ? medals[idx] : "💪";
+    const weeklyCount = fitnessWeekly[uid] ? fitnessWeekly[uid].yes : 0;
+    leaderboardMsg += `${flair} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no} (Weekly: ✅${weeklyCount})\n`;
+  });
+  leaderboardChannel.bulkDelete(10).catch(() => {});
+  leaderboardChannel.send({ content: leaderboardMsg });
 }
 
 // ------------------ Bot Ready ------------------
@@ -253,21 +268,6 @@ client.once("ready", async () => {
     }
   });
 
-  function updateLeaderboard() {
-    const leaderboardChannel = client.channels.cache.find(ch => ch.name.toLowerCase() === "leaderboard");
-    if (!leaderboardChannel) return;
-    let leaderboardMsg = "**🏆 Fitness Leaderboard (Daily Updated) 🏆**\n\n";
-    const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
-    sorted.forEach(([uid, data], idx) => {
-      const medals = ["🥇", "🥈", "🥉"];
-      const flair = idx < 3 ? medals[idx] : "💪";
-      const weeklyCount = fitnessWeekly[uid] ? fitnessWeekly[uid].yes : 0;
-      leaderboardMsg += `${flair} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no} (Weekly: ✅${weeklyCount})\n`;
-    });
-    leaderboardChannel.bulkDelete(10).catch(() => {});
-    leaderboardChannel.send({ content: leaderboardMsg });
-  }
-
   cron.schedule("0 0 * * 0", async () => {
     const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "leaderboard");
     if (!channel) return;
@@ -315,24 +315,11 @@ client.on("messageCreate", async message => {
   // ------------------ Quick Test Command ------------------
   if (message.content === "!test") {
     try {
-      // Fetch 2 random YouTube fitness videos
       const videos = await getRandomFitnessVideos(2);
-
-      // Fetch Instagram posts from influencers
       const instaPosts = await Promise.all(instagramInfluencers.map(u => getLiveInstagramPost(u)));
-
-      // Combine all results
       const combined = [...videos, ...instaPosts];
-
-      if (combined.length === 0) {
-        return message.reply("No content found for testing.");
-      }
-
-      // Send each item separately
-      for (const item of combined) {
-        await message.channel.send(item);
-      }
-
+      if (combined.length === 0) return message.reply("No content found for testing.");
+      for (const item of combined) await message.channel.send(item);
     } catch (err) {
       console.error("Error in !test command:", err);
       return message.reply("❌ Something went wrong while fetching test content.");
@@ -359,18 +346,16 @@ client.on("messageCreate", async message => {
     if (/done|✅|yes/i.test(message.content)) {
       fitnessWeekly[user].yes += 1;
       fitnessMonthly[user].yes += 1;
-      saveWeekly();
-      saveMonthly();
     } else if (/not done|❌|no/i.test(message.content)) {
       fitnessWeekly[user].no += 1;
       fitnessMonthly[user].no += 1;
-      saveWeekly();
-      saveMonthly();
     }
+    saveWeekly();
+    saveMonthly();
     updateLeaderboard();
   }
 
-  // General OpenAI Response in Tips & Guide or Wealth/Health/Faith/Fitness channels
+  // OpenAI Response
   if (["tips and guide", "wealth", "health", "faith", "fitness"].includes(channel)) {
     const response = await getOpenAIResponse(message.content);
     message.reply(response);
