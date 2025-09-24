@@ -193,8 +193,6 @@ client.once("ready", async () => {
   }
 
   // ------------------ Cron Jobs ------------------
-
-  // Daily Check-Ins Reminders
   const checkInTimes = ["0 7 * * *", "0 10 * * *", "0 14 * * *", "0 18 * * *", "0 21 * * *"];
   checkInTimes.forEach(time => {
     cron.schedule(time, async () => {
@@ -203,7 +201,6 @@ client.once("ready", async () => {
     });
   });
 
-  // Daily Wealth Tip
   cron.schedule("0 9 * * *", async () => {
     const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "wealth");
     if (channel) {
@@ -214,7 +211,6 @@ client.once("ready", async () => {
     }
   });
 
-  // Daily Health News
   cron.schedule("0 10 * * *", async () => {
     const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "health");
     if (channel) {
@@ -223,7 +219,6 @@ client.once("ready", async () => {
     }
   });
 
-  // Combat Sports Updates 3x/day
   const fightTimes = ["0 8 * * *", "0 12 * * *", "0 16 * * *"];
   fightTimes.forEach(cronTime => {
     cron.schedule(cronTime, async () => {
@@ -236,18 +231,15 @@ client.once("ready", async () => {
     });
   });
 
-  // Fitness Channel Multiple Videos Daily
   cron.schedule("0 8 * * *", async () => {
     const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "fitness");
     if (!channel) return;
-
     const videos = await getRandomFitnessVideos(Math.floor(Math.random() * 2) + 2); // 2-3 videos
     for (const video of videos) {
       await channel.send(video);
     }
   });
 
-  // Birthday Reminder
   cron.schedule("0 8 * * *", async () => {
     const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "general");
     if (!channel) return;
@@ -260,8 +252,6 @@ client.once("ready", async () => {
       }
     }
   });
-
-  // ------------------ Leaderboard & Weekly/Monthly Dumps ------------------
 
   function updateLeaderboard() {
     const leaderboardChannel = client.channels.cache.find(ch => ch.name.toLowerCase() === "leaderboard");
@@ -278,7 +268,6 @@ client.once("ready", async () => {
     leaderboardChannel.send({ content: leaderboardMsg });
   }
 
-  // Weekly Fitness Dump
   cron.schedule("0 0 * * 0", async () => {
     const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "leaderboard");
     if (!channel) return;
@@ -295,7 +284,6 @@ client.once("ready", async () => {
     saveWeekly();
   });
 
-  // Monthly Fitness Dump
   cron.schedule("0 0 1 * *", async () => {
     const channel = client.channels.cache.find(ch => ch.name.toLowerCase() === "leaderboard");
     if (!channel) return;
@@ -323,6 +311,11 @@ client.on("messageCreate", async message => {
   if (!memory[channel]) memory[channel] = {};
   if (!memory[channel][user]) memory[channel][user] = [];
   memory[channel][user].push(message.content);
+
+  // ------------------ Quick Test Command ------------------
+  if (message.content === "!test") {
+    return message.reply("✅ GymBotBro is alive and responding!");
+  }
 
   // Birthday Command
   const args = message.content.split(" ");
