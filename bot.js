@@ -314,7 +314,30 @@ client.on("messageCreate", async message => {
 
   // ------------------ Quick Test Command ------------------
   if (message.content === "!test") {
-    return message.reply("✅ GymBotBro is alive and responding!");
+    try {
+      // Fetch 2 random YouTube fitness videos
+      const videos = await getRandomFitnessVideos(2);
+
+      // Fetch Instagram posts from influencers
+      const instaPosts = await Promise.all(instagramInfluencers.map(u => getLiveInstagramPost(u)));
+
+      // Combine all results
+      const combined = [...videos, ...instaPosts];
+
+      if (combined.length === 0) {
+        return message.reply("No content found for testing.");
+      }
+
+      // Send each item separately
+      for (const item of combined) {
+        await message.channel.send(item);
+      }
+
+    } catch (err) {
+      console.error("Error in !test command:", err);
+      return message.reply("❌ Something went wrong while fetching test content.");
+    }
+    return;
   }
 
   // Birthday Command
