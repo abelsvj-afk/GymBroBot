@@ -685,7 +685,7 @@ client.once("ready", async () => {
     if (!ch) return;
     const u = await getSportsUpdates();
     await ch.send({ content: `🥊 Combat & Sports Update:\n${u}` });
-  }, { timezone: "America/New_York" }));
+  }, { timezone: "America/New_York" });
 
   // Fitness videos 12PM
   cron.schedule("0 12 * * *", async () => {
