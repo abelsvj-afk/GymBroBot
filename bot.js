@@ -50,15 +50,25 @@ const BIRTHDAY_FILE = "./birthdays.json";
 const FITNESS_WEEKLY_FILE = "./fitnessWeekly.json";
 const FITNESS_MONTHLY_FILE = "./fitnessMonthly.json";
 
+// New partner files
+const PARTNER_QUEUE_FILE = "./partnerQueue.json";
+const PARTNERS_FILE = "./partners.json";
+
 let memory = fs.existsSync(MEMORY_FILE) ? JSON.parse(fs.readFileSync(MEMORY_FILE)) : {};
 let birthdays = fs.existsSync(BIRTHDAY_FILE) ? JSON.parse(fs.readFileSync(BIRTHDAY_FILE)) : {};
 let fitnessWeekly = fs.existsSync(FITNESS_WEEKLY_FILE) ? JSON.parse(fs.readFileSync(FITNESS_WEEKLY_FILE)) : {};
 let fitnessMonthly = fs.existsSync(FITNESS_MONTHLY_FILE) ? JSON.parse(fs.readFileSync(FITNESS_MONTHLY_FILE)) : {};
 
+// New data structures
+let partnerQueue = fs.existsSync(PARTNER_QUEUE_FILE) ? JSON.parse(fs.readFileSync(PARTNER_QUEUE_FILE)) : []; // array of userIds
+let partners = fs.existsSync(PARTNERS_FILE) ? JSON.parse(fs.readFileSync(PARTNERS_FILE)) : {}; // channelId -> { users: [id1,id2], createdAt }
+
 const saveMemory = () => fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2));
 const saveBirthdays = () => fs.writeFileSync(BIRTHDAY_FILE, JSON.stringify(birthdays, null, 2));
 const saveWeekly = () => fs.writeFileSync(FITNESS_WEEKLY_FILE, JSON.stringify(fitnessWeekly, null, 2));
 const saveMonthly = () => fs.writeFileSync(FITNESS_MONTHLY_FILE, JSON.stringify(fitnessMonthly, null, 2));
+const savePartnerQueue = () => fs.writeFileSync(PARTNER_QUEUE_FILE, JSON.stringify(partnerQueue, null, 2));
+const savePartners = () => fs.writeFileSync(PARTNERS_FILE, JSON.stringify(partners, null, 2));
 
 // ------------------ YouTube Fitness Video Fetch (keywords updated) ------------------
 const fitnessQueries = [
@@ -194,6 +204,117 @@ async function updateLeaderboardChannel() {
     await leaderboardChannel.send({ content: msg });
   } catch (err) {
     console.error("Error updating leaderboard channel:", err.message);
+  }
+}
+
+// ------------------ Utilities for Partner System ------------------
+async function findOrCreateAccountabilityCategory(guild) {
+  // Try to find existing category (case-insensitive)
+  const existing = guild.channels.cache.find(c => c.type === 4 && (c.name || "").toLowerCase() === "accountability partners");
+  if (existing) return existing;
+  try {
+    const cat = await guild.channels.create({
+      name: "Accountability Partners",
+      type: 4, // GUILD_CATEGORY
+      reason: "Create category for accountability partner private channels"
+    });
+    return cat;
+  } catch (e) {
+    console.error("Error creating Accountability Partners category:", e.message);
+    // fallback: return null
+    return null;
+  }
+}
+
+function findModeratorRole(guild) {
+  // try to find a role that has ManageMessages permission so mods can view partner channels
+  const role = guild.roles.cache.find(r => r.permissions && r.permissions.has && r.permissions.has(PermissionsBitField.Flags.ManageMessages));
+  return role || null;
+}
+
+// Create a partner private channel for two users
+async function createPartnerChannel(guild, userAId, userBId) {
+  try {
+    const category = await findOrCreateAccountabilityCategory(guild);
+
+    // channel name e.g., partner-username1-username2 (shortened)
+    const userA = await guild.members.fetch(userAId).catch(() => null);
+    const userB = await guild.members.fetch(userBId).catch(() => null);
+
+    const safeName = `partner-${userA ? userA.user.username.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0,8) : userAId.slice(0,6)}-${userB ? userB.user.username.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0,8) : userBId.slice(0,6)}`.slice(0,90);
+
+    // find mod role (optional)
+    const modRole = findModeratorRole(guild);
+    const permissionOverwrites = [
+      { id: guild.roles.everyone.id, deny: ['ViewChannel'] },
+      { id: userAId, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
+      { id: userBId, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory'] },
+      { id: client.user.id, allow: ['ViewChannel', 'SendMessages', 'ReadMessageHistory', 'ManageMessages'] }
+    ];
+
+    if (modRole) {
+      permissionOverwrites.push({ id: modRole.id, allow: ['ViewChannel', 'ReadMessageHistory'] });
+    }
+
+    const channel = await guild.channels.create({
+      name: safeName,
+      type: 0, // GUILD_TEXT
+      parent: category ? category.id : undefined,
+      permissionOverwrites
+    });
+
+    // store partner mapping
+    partners[channel.id] = {
+      users: [userAId, userBId],
+      createdAt: new Date().toISOString()
+    };
+    savePartners();
+
+    // notify users in DMs if possible
+    try {
+      const dmA = await client.users.fetch(userAId);
+      await dmA.send(`✅ You were paired with <@${userBId}>. Your private accountability channel: ${channel.toString()}`);
+    } catch (e) { /* ignore DM fails */ }
+
+    try {
+      const dmB = await client.users.fetch(userBId);
+      await dmB.send(`✅ You were paired with <@${userAId}>. Your private accountability channel: ${channel.toString()}`);
+    } catch (e) { /* ignore DM fails */ }
+
+    // post a welcome message inside the channel
+    await channel.send(`Welcome <@${userAId}> and <@${userBId}>! This is your private Accountability Partner channel. Use \`!endpartner\` to end this pairing when you're done. Be kind, encourage each other, and stay consistent!`);
+
+    return channel;
+  } catch (err) {
+    console.error("Error creating partner channel:", err);
+    return null;
+  }
+}
+
+// End a partner pairing, delete channel and notify users
+async function endPartnerChannel(channel, reason = "User requested end") {
+  try {
+    if (!partners[channel.id]) return false;
+    const p = partners[channel.id];
+    const users = p.users || [];
+    // delete mapping first
+    delete partners[channel.id];
+    savePartners();
+
+    // notify users via DM
+    for (const uid of users) {
+      try {
+        const user = await client.users.fetch(uid);
+        await user.send(`Your accountability pairing in ${channel.name} has been ended. Reason: ${reason}`);
+      } catch (e) { /* ignore */ }
+    }
+
+    // delete the channel
+    await channel.delete(`Partner ended: ${reason}`).catch(e => console.error("Failed to delete partner channel:", e.message));
+    return true;
+  } catch (e) {
+    console.error("Error ending partner channel:", e);
+    return false;
   }
 }
 
@@ -433,7 +554,7 @@ client.on("messageCreate", async message => {
   // This simulates triggering the weekly dump (so you can test reset without waiting).
   if (message.content === "!checkin-test") {
     if (channelName !== "daily-check-ins") {
-      return message.reply("Please run `!checkin-test` in the #daily-check-ins channel for safety.");
+      return message.reply("Please run `!checkin-test` in the #daily-checkins channel for safety.");
     }
 
     // Basic permission check: only allow users with ManageMessages permission to run test
@@ -466,6 +587,140 @@ client.on("messageCreate", async message => {
     saveWeekly();
     message.reply("Check-in test completed: weekly snapshot posted to #leaderboard and weekly data reset.");
     return;
+  }
+
+  // ------------------ Partnership & Coach Commands (NEW) ------------------
+  // NOTE: these are additive only and won't change existing behavior
+
+  // 1) Find Partner - user joins queue to be paired
+  if (message.content === "!findpartner") {
+    try {
+      // ensure guild context
+      if (!message.guild) return message.reply("This command must be used from your server, not DMs.");
+
+      // check if user already in a partner channel
+      const alreadyPaired = Object.values(partners).some(p => p.users && p.users.includes(user));
+      if (alreadyPaired) {
+        return message.reply("You already have an active accountability partner. Use `!endpartner` in the partner channel to end it before finding a new partner.");
+      }
+
+      if (partnerQueue.includes(user)) {
+        return message.reply("You're already in the partner queue. Stand by — we'll pair you soon.");
+      }
+
+      // If queue has at least one waiting user, pair them
+      if (partnerQueue.length > 0) {
+        const otherUser = partnerQueue.shift();
+        savePartnerQueue();
+
+        // create a partner channel
+        const channel = await createPartnerChannel(message.guild, otherUser, user);
+        if (channel) {
+          return message.reply(`You've been paired! Check your DMs or go to ${channel.toString()}`);
+        } else {
+          // If unable to create channel, put the other user back to queue
+          partnerQueue.unshift(otherUser);
+          savePartnerQueue();
+          return message.reply("Sorry — couldn't create the partner channel right now. Try again in a bit.");
+        }
+      } else {
+        // add to queue and notify
+        partnerQueue.push(user);
+        savePartnerQueue();
+        return message.reply("You're added to the partner queue. I'll pair you with someone as soon as another member joins. (Use `!cancelpartner` to leave the queue.)");
+      }
+    } catch (e) {
+      console.error("Error in !findpartner:", e);
+      return message.reply("Something went wrong trying to find a partner. Try again later.");
+    }
+  }
+
+  // Cancel waiting in queue
+  if (message.content === "!cancelpartner") {
+    const idx = partnerQueue.indexOf(user);
+    if (idx === -1) return message.reply("You're not in the partner queue.");
+    partnerQueue.splice(idx, 1);
+    savePartnerQueue();
+    return message.reply("You've been removed from the partner queue.");
+  }
+
+  // End partner pairing — user can run this from within the partner channel or anywhere to end their active pairing
+  if (message.content === "!endpartner") {
+    try {
+      // find channel where user is in partners mapping
+      const partnerChannelEntry = Object.entries(partners).find(([chanId, info]) => info.users.includes(user));
+      if (!partnerChannelEntry) {
+        return message.reply("You don't appear to have an active partner channel.");
+      }
+      const [chanId, info] = partnerChannelEntry;
+      const channel = message.guild.channels.cache.get(chanId) || await client.channels.fetch(chanId).catch(() => null);
+      if (!channel) {
+        // channel missing — just cleanup mapping
+        delete partners[chanId];
+        savePartners();
+        return message.reply("Partner channel not found. Your pairing has been cleared.");
+      }
+      await endPartnerChannel(channel, `Ended by user ${message.author.tag}`);
+      return message.reply("Your accountability pairing has been ended and the private channel has been removed.");
+    } catch (e) {
+      console.error("Error in !endpartner:", e);
+      return message.reply("Something went wrong trying to end your partner pairing.");
+    }
+  }
+
+  // 2) Progress command - shows personal weekly/monthly stats
+  if (message.content === "!progress") {
+    try {
+      const weekly = fitnessWeekly[user] || { yes: 0, no: 0 };
+      const monthly = fitnessMonthly[user] || { yes: 0, no: 0 };
+      const streak = weekly.yes - weekly.no; // simple measure
+      const reply = `📊 **Your Progress**\nWeekly → ✅ ${weekly.yes} | ❌ ${weekly.no}\nMonthly → ✅ ${monthly.yes} | ❌ ${monthly.no}\nStreak (weekly yes - no): ${streak}\nKeep going — consistency builds results!`;
+      return message.reply(reply);
+    } catch (e) {
+      console.error("Error in !progress:", e);
+      return message.reply("Couldn't fetch your progress right now.");
+    }
+  }
+
+  // 3) Reset progress (user-level)
+  if (message.content === "!resetprogress") {
+    try {
+      fitnessWeekly[user] = { yes: 0, no: 0 };
+      fitnessMonthly[user] = { yes: 0, no: 0 };
+      saveWeekly();
+      saveMonthly();
+      return message.reply("Your weekly and monthly progress has been reset. Fresh start 💪");
+    } catch (e) {
+      console.error("Error in !resetprogress:", e);
+      return message.reply("Couldn't reset your progress right now.");
+    }
+  }
+
+  // 4) Coach command - AI motivational pep talk
+  // usage: !coach [optional topic]
+  if (message.content.startsWith("!coach")) {
+    const raw = message.content.split(" ").slice(1).join(" ").trim();
+    const topic = raw || "motivation and accountability for daily goals";
+
+    // build persona + prompt
+    const coachPersona = `
+You are GymBotBro's Coach persona. Blend three tones:
+1) The disciplined coach (clear, strategic, action-oriented),
+2) The motivational speaker (energetic, encouraging, vivid),
+3) The empathetic friend (understanding, human, warms failure into growth).
+
+User request: "${topic}"
+Keep response concise (6-10 sentences), include 2 quick action steps the user can do today, one small affirmation line, and a short practical tip about staying consistent with habits.
+Do not lecture. Be direct, positive, and human. Use occasional emojis but not more than 3.
+`;
+
+    try {
+      const coachReply = await getOpenAIResponse(coachPersona);
+      return message.reply(coachReply);
+    } catch (e) {
+      console.error("Error in !coach:", e);
+      return message.reply("Coach is offline right now. Try again soon.");
+    }
   }
 
   // ------------------ OpenAI Response with Personality ------------------
