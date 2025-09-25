@@ -547,35 +547,63 @@ const SLASH_COMMANDS = [
   // strikes group
   {
     name: "strike",
-    description: "Manage strikes",
+    description: "Manage strikes", // must exist
+    type: 1, // CHAT_INPUT
     options: [
-      { name: "add", type: 1, description: "Add a strike to a user", options: [{ name: "user", type: 6, required: true }, { name: "reason", type: 3, required: false }] },
-      { name: "check", type: 1, description: "Check strikes for a user", options: [{ name: "user", type: 6, required: true }] },
-      { name: "clear", type: 1, description: "Clear strikes for a user", options: [{ name: "user", type: 6, required: true }] },
-    ],
+      {
+        name: "add",
+        description: "Add a strike to a user", // fixed BASE_TYPE_REQUIRED
+        type: 1, // SUB_COMMAND
+        options: [
+          { name: "user", description: "The user to strike", type: 6, required: true },
+          { name: "reason", description: "Reason for the strike", type: 3, required: false }
+        ]
+      },
+      {
+        name: "check",
+        description: "Check strikes for a user", // fixed
+        type: 1, // SUB_COMMAND
+        options: [
+          { name: "user", description: "The user to check", type: 6, required: true }
+        ]
+      },
+      {
+        name: "clear",
+        description: "Clear strikes for a user", // fixed
+        type: 1, // SUB_COMMAND
+        options: [
+          { name: "user", description: "The user to clear strikes for", type: 6, required: true }
+        ]
+      }
+    ]
   },
   {
     name: "partner",
-    description: "Partner system actions",
+    description: "Partner system actions", // must exist
+    type: 1,
     options: [
-      { name: "queue", type: 1, description: "Join the partner queue (DM prompt)" },
-      { name: "cancel", type: 1, description: "Cancel your partner queue request" },
-      { name: "end", type: 1, description: "End your current partner pairing" },
-      { name: "status", type: 1, description: "Show partner queue status" },
-    ],
+      { name: "queue", description: "Join the partner queue (DM prompt)", type: 1 },
+      { name: "cancel", description: "Cancel your partner queue request", type: 1 },
+      { name: "end", description: "End your current partner pairing", type: 1 },
+      { name: "status", description: "Show partner queue status", type: 1 }
+    ]
   },
-  { name: "progress", description: "Show your fitness progress (weekly/monthly)" },
-  { name: "coach", description: "Get a short AI coach pep talk", options: [{ name: "topic", type: 3, required: false }] },
+  { name: "progress", description: "Show your fitness progress (weekly/monthly)", type: 1 },
+  { name: "coach", description: "Get a short AI coach pep talk", type: 1, options: [{ name: "topic", description: "Topic for advice", type: 3, required: false }] },
   // testing (mod-only)
-  { name: "testpair", description: "Create a test pairing (mod only)", options: [{ name: "user1", type: 6, required: true }, { name: "user2", type: 6, required: true }] },
-  { name: "teststrike", description: "Apply a test strike (mod only)", options: [{ name: "user", type: 6, required: true }] },
+  { name: "testpair", description: "Create a test pairing (mod only)", type: 1, options: [
+    { name: "user1", description: "First user to pair", type: 6, required: true },
+    { name: "user2", description: "Second user to pair", type: 6, required: true }
+  ] },
+  { name: "teststrike", description: "Apply a test strike (mod only)", type: 1, options: [
+    { name: "user", description: "User to test strike", type: 6, required: true }
+  ] },
 ];
 
 // helper to register per-guild on ready (safer than global registration)
 async function registerSlashCommandsForGuild(guild) {
   try {
     const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
-    // register via applicationGuildCommands
     await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: SLASH_COMMANDS });
     console.log(`Slash commands registered for guild ${guild.id}`);
   } catch (e) {
@@ -584,7 +612,7 @@ async function registerSlashCommandsForGuild(guild) {
 }
 
 // ------------------ Bot ready ------------------
-client.once("ready", async () => {
+client.once("clientready", async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   // register slash commands for every guild the bot is in
   for (const [guildId, guild] of client.guilds.cache) {
@@ -613,7 +641,7 @@ client.once("ready", async () => {
     const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === name);
     if (!ch) continue;
     try {
-      const pinned = await ch.messages.fetchPinned();
+      const pinned = await ch.messages.fetchPins();
       if (!pinned.some(m => m.content === message || (m.embeds && m.embeds.some(e => e.description === message)))) {
         const embed = new EmbedBuilder().setTitle(`Guide — #${name}`).setDescription(message).setColor(0x00AE86);
         const sent = await ch.send({ embeds: [embed] });
@@ -759,225 +787,249 @@ client.on("messageCreate", async (message) => {
   }
 
   // ------------------ Prefix commands (preserve existing ones) ------------------
-  // !test
-  if (message.content === "!test") {
-    try {
-      const videos = await getRandomFitnessVideos(2);
-      if (!videos || videos.length === 0) return message.reply("No content found for testing.");
-      for (const v of videos) await message.channel.send(v);
-    } catch (e) {
-      console.error("!test error:", e);
-      return message.reply("Error running test.");
-    }
-    return;
-  }
 
-  // !leaderboard (only in leaderboard)
-  if (message.content === "!leaderboard") {
-    if (channelName !== "leaderboard") return message.reply("Please run `!leaderboard` in the #leaderboard channel only.");
+// !test
+if (message.content === "!test") {
+  try {
+    const videos = await getRandomFitnessVideos(2);
+    if (!videos || !Array.isArray(videos) || videos.length === 0) return message.reply("No content found for testing.");
+    for (const v of videos) await message.channel.send(v);
+  } catch (e) {
+    console.error("!test error:", e);
+    return message.reply("Error running test.");
+  }
+  return;
+}
+
+// !leaderboard (only in leaderboard channel)
+if (message.content === "!leaderboard") {
+  if (channelName !== "leaderboard") return message.reply("Please run `!leaderboard` in the #leaderboard channel only.");
+  try {
     const msg = buildLeaderboardMessage();
     return message.channel.send({ content: msg });
+  } catch (e) {
+    console.error("!leaderboard error:", e);
+    return message.reply("Error generating leaderboard.");
+  }
+}
+
+// birthday commands
+const args = message.content.split(" ");
+if (args[0] === "setbirthday") {
+  const date = args[1];
+  if (!date || !/^\d{2}-\d{2}$/.test(date)) return message.reply("Please provide your birthday in MM-DD format, e.g., `setbirthday 09-23`");
+  birthdays[authorId] = `${new Date().getFullYear()}-${date}`;
+  saveBirthdays();
+  return message.reply(`Got it! Your birthday has been saved as ${date}. 🎉`);
+}
+
+if (message.content === "!birthdays") {
+  if (channelName !== "general") return message.reply("You can only run `!birthdays` in the #general channel.");
+  const entries = Object.entries(birthdays);
+  if (!entries.length) return message.channel.send("No birthdays stored yet.");
+  let out = "**Saved Birthdays:**\n";
+  entries.forEach(([uid, d]) => out += `<@${uid}> → ${d}\n`);
+  return message.channel.send({ content: out });
+}
+
+// daily-check-ins
+if (channelName === "daily-check-ins") {
+  if (!fitnessWeekly[authorId]) fitnessWeekly[authorId] = { yes: 0, no: 0 };
+  if (!fitnessMonthly[authorId]) fitnessMonthly[authorId] = { yes: 0, no: 0 };
+
+  if (/done|✅|yes/i.test(message.content)) {
+    fitnessWeekly[authorId].yes += 1;
+    fitnessMonthly[authorId].yes += 1;
+  } else if (/not done|❌|no/i.test(message.content)) {
+    fitnessWeekly[authorId].no += 1;
+    fitnessMonthly[authorId].no += 1;
+  } else {
+    return; // ignore non-explicit responses
   }
 
-  // birthday commands
-  const args = message.content.split(" ");
-  if (args[0] === "setbirthday") {
-    const date = args[1];
-    if (!date || !/^\d{2}-\d{2}$/.test(date)) return message.reply("Please provide your birthday in MM-DD format, e.g., `setbirthday 09-23`");
-    birthdays[authorId] = `${new Date().getFullYear()}-${date}`;
-    saveBirthdays();
-    return message.reply(`Got it! Your birthday has been saved as ${date}. 🎉`);
-  }
-  if (message.content === "!birthdays") {
-    if (channelName !== "general") return message.reply("You can only run `!birthdays` in the #general channel.");
-    const entries = Object.entries(birthdays);
-    if (!entries.length) return message.channel.send("No birthdays stored yet.");
-    let out = "**Saved Birthdays:**\n";
-    entries.forEach(([uid, d]) => out += `<@${uid}> → ${d}\n`);
-    return message.channel.send(out);
+  saveWeekly();
+  saveMonthly();
+  try { await updateLeaderboardChannel(); } catch (e) { console.error("updateLeaderboardChannel error:", e); }
+  return;
+}
+
+// !checkin-test (mod-only)
+if (message.content === "!checkin-test") {
+  if (channelName !== "daily-check-ins") return message.reply("Please run `!checkin-test` in the #daily-check-ins channel for safety.");
+  try {
+    const member = await message.guild.members.fetch(message.author.id).catch(() => null);
+    if (!member || !isModeratorMember(member)) return message.reply("You must be a moderator to run this test.");
+  } catch (e) {
+    console.error("!checkin-test member fetch error:", e);
+    return message.reply("Error verifying moderator status.");
   }
 
-  // daily-check-ins
-  if (channelName === "daily-check-ins") {
-    if (!fitnessWeekly[authorId]) fitnessWeekly[authorId] = { yes: 0, no: 0 };
-    if (!fitnessMonthly[authorId]) fitnessMonthly[authorId] = { yes: 0, no: 0 };
-    if (/done|✅|yes/i.test(message.content)) {
-      fitnessWeekly[authorId].yes += 1;
-      fitnessMonthly[authorId].yes += 1;
-    } else if (/not done|❌|no/i.test(message.content)) {
-      fitnessWeekly[authorId].no += 1;
-      fitnessMonthly[authorId].no += 1;
-    } else {
-      return; // ignore non explicit responses
-    }
-    saveWeekly();
-    saveMonthly();
-    await updateLeaderboardChannel();
-    return;
-  }
+  const leaderboardChannel = client.channels.cache.find(ch => (ch.name || "").toLowerCase() === "leaderboard");
+  if (!leaderboardChannel) return message.reply("No #leaderboard channel found.");
 
-  // !checkin-test (mod-only)
-  if (message.content === "!checkin-test") {
-    if (channelName !== "daily-check-ins") return message.reply("Please run `!checkin-test` in the #daily-checkins channel for safety.");
-    try {
-      const member = await message.guild.members.fetch(message.author.id);
-      if (!isModeratorMember(member)) return message.reply("You must be a moderator to run this test.");
-    } catch {}
-    const leaderboardChannel = client.channels.cache.find(ch => (ch.name || "").toLowerCase() === "leaderboard");
-    if (!leaderboardChannel) return message.reply("No #leaderboard channel found.");
-    const sorted = Object.entries(fitnessWeekly).sort((a,b)=> (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
-    let msg = "**🏅 WEEKLY FITNESS TEST DUMP 🏅**\n";
-    if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
-    msg += "\n💥 Weekly Top 5 (TEST):\n";
-    sorted.slice(0,5).forEach(([uid, data], idx) => {
-      const medals = ["🥇","🥈","🥉","🏋️","💪"];
-      msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
-    });
-    await leaderboardChannel.send({ content: msg });
-    for (const uid in fitnessWeekly) fitnessWeekly[uid] = { yes: 0, no: 0 };
-    saveWeekly();
-    message.reply("Check-in test completed: weekly snapshot posted to #leaderboard and weekly data reset.");
-    return;
-  }
+  const sorted = Object.entries(fitnessWeekly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
+  let msg = "**🏅 WEEKLY FITNESS TEST DUMP 🏅**\n";
+  if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
+  msg += "\n💥 Weekly Top 5 (TEST):\n";
+
+  const medals = ["🥇", "🥈", "🥉", "🏋️", "💪"];
+  sorted.slice(0, 5).forEach(([uid, data], idx) => {
+    msg += `${medals[idx] || "🏅"} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
+  });
+
+  try { await leaderboardChannel.send({ content: msg }); } catch (e) { console.error("!checkin-test send error:", e); }
+
+  // reset weekly fitness
+  for (const uid in fitnessWeekly) fitnessWeekly[uid] = { yes: 0, no: 0 };
+  saveWeekly();
+
+  message.reply("Check-in test completed: weekly snapshot posted to #leaderboard and weekly data reset.");
+  return;
+}
+
 
   // ------------------ Partnership & Coach Commands (prefix) ------------------
-  // !findpartner
-  if (message.content === "!findpartner") {
-    try {
-      if (!message.guild) return message.reply("This command must be used from your server, not DMs.");
-      // check if already paired
-      const alreadyPaired = Object.values(partners).some(p => p.users && p.users.includes(authorId));
-      if (alreadyPaired) return message.reply("You already have an active accountability partner. Use `!endpartner` to end it first.");
-      if (partnerQueue.some(q => q.id === authorId)) return message.reply("You're already in the partner queue.");
-      // DM prompt to choose goal or future
-      try {
-        const dm = await message.author.send("Which partner type would you like? Reply with `goal` or `future`. Type `cancel` to cancel.");
-        await message.reply("I sent you a DM to choose your partner type. Reply there with `goal` or `future` (or `cancel`).");
-        const filter = m => m.author.id === authorId;
-        const collected = await dm.channel.awaitMessages({ filter, max: 1, time: 60000 }).catch(() => null);
-        let selection = "goal";
-        if (collected && collected.first()) {
-          const resp = collected.first().content.toLowerCase();
-          if (resp.startsWith("future")) selection = "future";
-          if (resp.startsWith("cancel")) return dm.channel.send("Partner request cancelled.");
-        } else {
-          await dm.channel.send("No response received — added to queue as Goal Partner by default.");
-        }
-        partnerQueue.push({ id: authorId, type: selection, joinedAt: new Date().toISOString() });
-        savePartnerQueue();
-        await dm.channel.send(`You've been added to the partner queue as **${selection}**. Standby.`);
-        await message.channel.send("You're added to the partner queue (check your DMs).");
-      } catch (e) {
-        // fallback: add as goal
-        partnerQueue.push({ id: authorId, type: "goal", joinedAt: new Date().toISOString() });
-        savePartnerQueue();
-        return message.reply("Couldn't DM you — you've been added to the queue as a Goal Partner.");
-      }
-    } catch (e) {
-      console.error("!findpartner error:", e);
-      return message.reply("Something went wrong trying to find a partner. Try again later.");
-    }
-    return;
-  }
+// Ensure partnerQueue is always an array
+if (!Array.isArray(partnerQueue)) partnerQueue = [];
 
-  // !cancelpartner
-  if (message.content === "!cancelpartner") {
-    const idx = partnerQueue.findIndex(x => x.id === authorId);
-    if (idx === -1) return message.reply("You're not in the partner queue.");
-    partnerQueue.splice(idx, 1);
-    savePartnerQueue();
-    return message.reply("You've been removed from the partner queue.");
-  }
-
-  // !endpartner
-  if (message.content === "!endpartner") {
+// !findpartner
+if (message.content === "!findpartner") {
+  try {
+    if (!message.guild) return message.reply("This command must be used from your server, not DMs.");
+    // check if already paired
+    const alreadyPaired = Object.values(partners).some(p => p.users && p.users.includes(authorId));
+    if (alreadyPaired) return message.reply("You already have an active accountability partner. Use `!endpartner` to end it first.");
+    if (partnerQueue.some(q => q.id === authorId)) return message.reply("You're already in the partner queue.");
+    // DM prompt to choose goal or future
     try {
-      const entry = Object.entries(partners).find(([chanId, info]) => info.users.includes(authorId));
-      if (!entry) return message.reply("You don't appear to have an active partner channel.");
-      const [chanId] = entry;
-      const channelObj = message.guild.channels.cache.get(chanId) || await client.channels.fetch(chanId).catch(() => null);
-      if (!channelObj) {
-        delete partners[chanId];
-        savePartners();
-        return message.reply("Partner channel not found. Your pairing has been cleared.");
-      }
-      await endPartnerChannel(channelObj, `Ended by user ${message.author.tag}`);
-      return message.reply("Your accountability pairing has been ended and the private channel has been removed.");
-    } catch (e) {
-      console.error("!endpartner error:", e);
-      return message.reply("Something went wrong trying to end your partner pairing.");
-    }
-  }
-
-  // auto-pairing: if queue has 2 or more, attempt to pair similar types
-  if (partnerQueue.length >= 2) {
-    try {
-      // choose first and find compatible
-      const first = partnerQueue.shift();
-      let otherIndex = partnerQueue.findIndex(x => x.type === first.type);
-      if (otherIndex === -1) otherIndex = 0;
-      const other = partnerQueue.splice(otherIndex, 1)[0];
-      savePartnerQueue();
-      // check blocked status
-      const blockA = (strikes[guild.id] && strikes[guild.id][first.id] && strikes[guild.id][first.id].blockedFromMatching) || false;
-      const blockB = (strikes[guild.id] && strikes[guild.id][other.id] && strikes[guild.id][other.id].blockedFromMatching) || false;
-      if (blockA || blockB) {
-        // put back only non-blocked user
-        if (!blockA) partnerQueue.push(first);
-        if (!blockB) partnerQueue.push(other);
-        savePartnerQueue();
+      const dm = await message.author.send("Which partner type would you like? Reply with `goal` or `future`. Type `cancel` to cancel.");
+      await message.reply("I sent you a DM to choose your partner type. Reply there with `goal` or `future` (or `cancel`).");
+      const filter = m => m.author.id === authorId;
+      const collected = await dm.channel.awaitMessages({ filter, max: 1, time: 60000 }).catch(() => null);
+      let selection = "goal";
+      if (collected && collected.first()) {
+        const resp = collected.first().content.toLowerCase();
+        if (resp.startsWith("future")) selection = "future";
+        if (resp.startsWith("cancel")) return dm.channel.send("Partner request cancelled.");
       } else {
-        const ch = await createPartnerChannel(guild, first.id, other.id, { type: first.type });
-        if (ch) {
-          const embed = new EmbedBuilder().setTitle("Paired!").setDescription(`<@${first.id}> and <@${other.id}> have been paired.\nCheck your DMs or go to ${ch.toString()}`).setColor(0x00AE86).setTimestamp();
-          try { await (await client.users.fetch(first.id)).send({ embeds: [embed] }); } catch {}
-          try { await (await client.users.fetch(other.id)).send({ embeds: [embed] }); } catch {}
-          await message.channel.send(`Paired <@${first.id}> and <@${other.id}>. Channel: ${ch.toString()}`);
-        } else {
-          // failed to create, requeue
-          partnerQueue.unshift(first);
-          partnerQueue.unshift(other);
-          savePartnerQueue();
-        }
+        await dm.channel.send("No response received — added to queue as Goal Partner by default.");
       }
+      partnerQueue.push({ id: authorId, type: selection, joinedAt: new Date().toISOString() });
+      savePartnerQueue();
+      await dm.channel.send(`You've been added to the partner queue as **${selection}**. Standby.`);
+      await message.channel.send("You're added to the partner queue (check your DMs).");
     } catch (e) {
-      console.error("auto pairing error:", e);
+      // fallback: add as goal
+      partnerQueue.push({ id: authorId, type: "goal", joinedAt: new Date().toISOString() });
+      savePartnerQueue();
+      return message.reply("Couldn't DM you — you've been added to the queue as a Goal Partner.");
     }
+  } catch (e) {
+    console.error("!findpartner error:", e);
+    return message.reply("Something went wrong trying to find a partner. Try again later.");
   }
+  return;
+}
 
-  // !progress
-  if (message.content === "!progress") {
-    try {
-      const weekly = fitnessWeekly[authorId] || { yes: 0, no: 0 };
-      const monthly = fitnessMonthly[authorId] || { yes: 0, no: 0 };
-      const streak = weekly.yes - weekly.no;
-      const reply = `📊 **Your Progress**\nWeekly → ✅ ${weekly.yes} | ❌ ${weekly.no}\nMonthly → ✅ ${monthly.yes} | ❌ ${monthly.no}\nStreak (weekly yes - no): ${streak}\nKeep going — consistency builds results!`;
-      return message.reply(reply);
-    } catch (e) {
-      console.error("!progress error:", e);
-      return message.reply("Couldn't fetch your progress right now.");
+// !cancelpartner
+if (message.content === "!cancelpartner") {
+  const idx = partnerQueue.findIndex(x => x.id === authorId);
+  if (idx === -1) return message.reply("You're not in the partner queue.");
+  partnerQueue.splice(idx, 1);
+  savePartnerQueue();
+  return message.reply("You've been removed from the partner queue.");
+}
+
+// !endpartner
+if (message.content === "!endpartner") {
+  try {
+    const entry = Object.entries(partners).find(([chanId, info]) => info.users.includes(authorId));
+    if (!entry) return message.reply("You don't appear to have an active partner channel.");
+    const [chanId] = entry;
+    const channelObj = message.guild.channels.cache.get(chanId) || await client.channels.fetch(chanId).catch(() => null);
+    if (!channelObj) {
+      delete partners[chanId];
+      savePartners();
+      return message.reply("Partner channel not found. Your pairing has been cleared.");
     }
+    await endPartnerChannel(channelObj, `Ended by user ${message.author.tag}`);
+    return message.reply("Your accountability pairing has been ended and the private channel has been removed.");
+  } catch (e) {
+    console.error("!endpartner error:", e);
+    return message.reply("Something went wrong trying to end your partner pairing.");
   }
+}
 
-  // !resetprogress
-  if (message.content === "!resetprogress") {
-    try {
-      fitnessWeekly[authorId] = { yes: 0, no: 0 };
-      fitnessMonthly[authorId] = { yes: 0, no: 0 };
-      saveWeekly();
-      saveMonthly();
-      return message.reply("Your weekly and monthly progress has been reset. Fresh start 💪");
-    } catch (e) {
-      console.error("!resetprogress error:", e);
-      return message.reply("Couldn't reset your progress right now.");
+// auto-pairing: if queue has 2 or more, attempt to pair similar types
+if (partnerQueue.length >= 2 && message.guild) { // <-- ensure guild exists
+  try {
+    const first = partnerQueue.shift();
+    let otherIndex = partnerQueue.findIndex(x => x.type === first.type);
+    if (otherIndex === -1) otherIndex = 0;
+    const other = partnerQueue.splice(otherIndex, 1)[0];
+    savePartnerQueue();
+
+    const blockA = (strikes[message.guild.id] && strikes[message.guild.id][first.id] && strikes[message.guild.id][first.id].blockedFromMatching) || false;
+    const blockB = (strikes[message.guild.id] && strikes[message.guild.id][other.id] && strikes[message.guild.id][other.id].blockedFromMatching) || false;
+
+    if (blockA || blockB) {
+      if (!blockA) partnerQueue.push(first);
+      if (!blockB) partnerQueue.push(other);
+      savePartnerQueue();
+    } else {
+      const ch = await createPartnerChannel(message.guild, first.id, other.id, { type: first.type });
+      if (ch) {
+        const embed = new EmbedBuilder()
+          .setTitle("Paired!")
+          .setDescription(`<@${first.id}> and <@${other.id}> have been paired.\nCheck your DMs or go to ${ch.toString()}`)
+          .setColor(0x00AE86)
+          .setTimestamp();
+        try { await (await client.users.fetch(first.id)).send({ embeds: [embed] }); } catch {}
+        try { await (await client.users.fetch(other.id)).send({ embeds: [embed] }); } catch {}
+        await message.channel.send(`Paired <@${first.id}> and <@${other.id}>. Channel: ${ch.toString()}`);
+      } else {
+        partnerQueue.unshift(first, other);
+        savePartnerQueue();
+      }
     }
+  } catch (e) {
+    console.error("auto pairing error:", e);
   }
+}
 
-  // !coach
-  if (message.content.startsWith("!coach")) {
-    const raw = message.content.split(" ").slice(1).join(" ").trim();
-    const topic = raw || "motivation and accountability for daily goals";
-    const coachPersona = `
+// !progress
+if (message.content === "!progress") {
+  try {
+    const weekly = fitnessWeekly[authorId] || { yes: 0, no: 0 };
+    const monthly = fitnessMonthly[authorId] || { yes: 0, no: 0 };
+    const streak = weekly.yes - weekly.no;
+    const reply = `📊 **Your Progress**\nWeekly → ✅ ${weekly.yes} | ❌ ${weekly.no}\nMonthly → ✅ ${monthly.yes} | ❌ ${monthly.no}\nStreak (weekly yes - no): ${streak}\nKeep going — consistency builds results!`;
+    return message.reply(reply);
+  } catch (e) {
+    console.error("!progress error:", e);
+    return message.reply("Couldn't fetch your progress right now.");
+  }
+}
+
+// !resetprogress
+if (message.content === "!resetprogress") {
+  try {
+    fitnessWeekly[authorId] = { yes: 0, no: 0 };
+    fitnessMonthly[authorId] = { yes: 0, no: 0 };
+    saveWeekly();
+    saveMonthly();
+    return message.reply("Your weekly and monthly progress has been reset. Fresh start 💪");
+  } catch (e) {
+    console.error("!resetprogress error:", e);
+    return message.reply("Couldn't reset your progress right now.");
+  }
+}
+
+// !coach
+if (message.content.startsWith("!coach")) {
+  const raw = message.content.split(" ").slice(1).join(" ").trim();
+  const topic = raw || "motivation and accountability for daily goals";
+  const coachPersona = `
 You are GymBotBro's Coach persona. Blend three tones:
 1) The disciplined coach (clear, strategic, action-oriented),
 2) The motivational speaker (energetic, encouraging, vivid),
@@ -986,169 +1038,220 @@ User request: "${topic}"
 Keep response concise (6-10 sentences), include 2 quick action steps the user can do today, one small affirmation line, and a short practical tip about staying consistent with habits.
 Do not lecture. Be direct, positive, and human. Use occasional emojis but not more than 3.
 `;
-    try {
-      const coachReply = await getOpenAIResponse(coachPersona);
-      return message.reply(coachReply);
-    } catch (e) {
-      console.error("!coach error:", e);
-      return message.reply("Coach is offline right now. Try again soon.");
-    }
+  try {
+    const coachReply = await getOpenAIResponse(coachPersona);
+    return message.reply(coachReply);
+  } catch (e) {
+    console.error("!coach error:", e);
+    return message.reply("Coach is offline right now. Try again soon.");
   }
+}
 
-  // OpenAI persona for channels (keep behavior)
-  if (["tips and guide", "wealth", "health", "faith", "fitness"].includes(channelName)) {
-    const userMemory = { lastMessage: message.content, previousMessages: memory[channelName][authorId]?.slice(-5) || [] };
-    const personaPrompt = () => {
-      const basePersona = `You are GymBotBro, a disciplined, stoic, God-fearing mentor with military-level strength and a strategic mindset. Always give advice with authority, clarity, and motivation.`;
-      let channelTraits = "";
-      switch (channelName) {
-        case "faith":
-          channelTraits = "Encourage the user spiritually, provide prayerful guidance, and reinforce Christian faith. Include Bible references when helpful.";
-          break;
-        case "wealth":
-          channelTraits = "Provide strategic financial guidance and actionable steps for business and investing.";
-          break;
-        case "health":
-          channelTraits = "Offer disciplined, practical health & wellness advice focused on consistency.";
-          break;
-        case "fitness":
-          channelTraits = "Encourage workouts, resilience, and actionable fitness tips.";
-          break;
-        case "tips and guide":
-          channelTraits = "Provide tactical life hacks and practical advice for everyday challenges.";
-          break;
-      }
-      const context = userMemory.previousMessages.length ? `Consider previous messages: ${userMemory.previousMessages.join(" | ")}` : "";
-      return `${basePersona}\n${channelTraits}\n${context}\nUser message: "${userMemory.lastMessage}"\nRespond concisely, authoritatively, and motivatingly.`;
-    };
-    try {
-      const res = await getOpenAIResponse(personaPrompt());
-      return message.reply(res);
-    } catch (e) {
-      console.error("AI persona error:", e);
-      return message.reply("❌ Something went wrong while generating a response.");
+// OpenAI persona for channels (keep behavior)
+if (["tips and guide", "wealth", "health", "faith", "fitness"].includes(channelName)) {
+  const userMemory = { lastMessage: message.content, previousMessages: memory[channelName][authorId]?.slice(-5) || [] };
+  const personaPrompt = () => {
+    const basePersona = `You are GymBotBro, a disciplined, stoic, God-fearing mentor with military-level strength and a strategic mindset. Always give advice with authority, clarity, and motivation.`;
+    let channelTraits = "";
+    switch (channelName) {
+      case "faith":
+        channelTraits = "Encourage the user spiritually, provide prayerful guidance, and reinforce Christian faith. Include Bible references when helpful.";
+        break;
+      case "wealth":
+        channelTraits = "Provide strategic financial guidance and actionable steps for business and investing.";
+        break;
+      case "health":
+        channelTraits = "Offer disciplined, practical health & wellness advice focused on consistency.";
+        break;
+      case "fitness":
+        channelTraits = "Encourage workouts, resilience, and actionable fitness tips.";
+        break;
+      case "tips and guide":
+        channelTraits = "Provide tactical life hacks and practical advice for everyday challenges.";
+        break;
     }
+    const context = userMemory.previousMessages.length ? `Consider previous messages: ${userMemory.previousMessages.join(" | ")}` : "";
+    return `${basePersona}\n${channelTraits}\n${context}\nUser message: "${userMemory.lastMessage}"\nRespond concisely, authoritatively, and motivatingly.`;
+  };
+  try {
+    const res = await getOpenAIResponse(personaPrompt());
+    return message.reply(res);
+  } catch (e) {
+    console.error("AI persona error:", e);
+    return message.reply("❌ Something went wrong while generating a response.");
   }
+}
+
 
   // ------------------ Moderator prefix commands for strikes/testing ------------------
-  if (guild) {
-    // !strike @user reason
-    if (message.content.startsWith("!strike ")) {
-      try {
-        const member = await guild.members.fetch(message.author.id).catch(() => null);
-        if (!member || !isModeratorMember(member)) return message.reply("You must be a moderator to run this command.");
-        const mention = message.mentions.users.first();
-        if (!mention) return message.reply("Please mention a user to strike: `!strike @user [reason]`");
-        const reason = message.content.split(" ").slice(2).join(" ") || "Violation";
-        await applyStrike({ guild, userId: mention.id, issuerId: message.author.id, reason, channel: message.channel });
-        return message.reply(`Strike applied to <@${mention.id}> for: ${reason}`);
-      } catch (e) {
-        console.error("!strike error:", e);
-        return message.reply("Couldn't apply strike. Check bot permissions.");
-      }
-    }
+if (guild) {
+  // !strike @user reason
+  if (message.content.startsWith("!strike ")) {
+    try {
+      const member = await guild.members.fetch(message.author.id).catch(() => null);
+      if (!member || !isModeratorMember(member))
+        return await message.reply("You must be a moderator to run this command.");
 
-    // !strikes @user
-    if (message.content.startsWith("!strikes ")) {
-      try {
-        const member = await guild.members.fetch(message.author.id).catch(() => null);
-        if (!member || !isModeratorMember(member)) return message.reply("You must be a moderator to run this command.");
-        const mention = message.mentions.users.first();
-        if (!mention) return message.reply("Please mention a user: `!strikes @user`");
-        const rec = strikes[guild.id] && strikes[guild.id][mention.id] ? strikes[guild.id][mention.id] : { count: 0, history: [] };
-        let out = `⚖️ Strikes for <@${mention.id}>: ${rec.count}\nRecent history:\n`;
-        rec.history.slice(-10).forEach(h => out += `- ${h.time}: ${h.reason} (by ${h.issuer ? `<@${h.issuer}>` : "system"})\n`);
-        return message.reply(out);
-      } catch (e) {
-        console.error("!strikes error:", e);
-        return message.reply("Couldn't fetch strikes.");
-      }
-    }
+      const mention = message.mentions.users.first();
+      if (!mention)
+        return await message.reply("Please mention a user to strike: `!strike @user [reason]`");
 
-    // !clearstrikes @user
-    if (message.content.startsWith("!clearstrikes ")) {
-      try {
-        const member = await guild.members.fetch(message.author.id).catch(() => null);
-        if (!member || !isModeratorMember(member)) return message.reply("You must be a moderator to run this command.");
-        const mention = message.mentions.users.first();
-        if (!mention) return message.reply("Please mention a user: `!clearstrikes @user`");
-        if (strikes[guild.id] && strikes[guild.id][mention.id]) {
-          delete strikes[guild.id][mention.id];
-          saveStrikes();
-          await notifyLoggingChannel(guild, `✅ <@${mention.id}>'s strikes cleared by <@${message.author.id}>.`);
-          return message.reply(`Strikes for <@${mention.id}> cleared.`);
-        } else {
-          return message.reply("User has no strikes recorded.");
-        }
-      } catch (e) {
-        console.error("!clearstrikes error:", e);
-        return message.reply("Couldn't clear strikes.");
-      }
-    }
+      const reason = message.content.split(" ").slice(2).join(" ") || "Violation";
 
-    // !blockpair @user and !unblockpair
-    if (message.content.startsWith("!blockpair ")) {
-      try {
-        const member = await guild.members.fetch(message.author.id).catch(() => null);
-        if (!member || !isModeratorMember(member)) return message.reply("You must be a moderator to run this command.");
-        const mention = message.mentions.users.first();
-        if (!mention) return message.reply("Please mention a user: `!blockpair @user`");
-        const rec = ensureStrikeRecord(guild.id, mention.id);
-        rec.blockedFromMatching = true;
-        saveStrikes();
-        return message.reply(`<@${mention.id}> has been blocked from future pairings.`);
-      } catch (e) {
-        console.error("!blockpair error:", e);
-        return message.reply("Couldn't block user from pairing.");
-      }
-    }
-    if (message.content.startsWith("!unblockpair ")) {
-      try {
-        const member = await guild.members.fetch(message.author.id).catch(() => null);
-        if (!member || !isModeratorMember(member)) return message.reply("You must be a moderator to run this command.");
-        const mention = message.mentions.users.first();
-        if (!mention) return message.reply("Please mention a user: `!unblockpair @user`");
-        const rec = ensureStrikeRecord(guild.id, mention.id);
-        rec.blockedFromMatching = false;
-        saveStrikes();
-        return message.reply(`<@${mention.id}> has been unblocked for future pairings.`);
-      } catch (e) {
-        console.error("!unblockpair error:", e);
-        return message.reply("Couldn't unblock user from pairing.");
-      }
-    }
+      await applyStrike({
+        guild,
+        userId: mention.id,
+        issuerId: message.author.id,
+        reason,
+        channel: message.channel,
+      });
 
-    // testing hooks: !teststrike @user and !testpair @u1 @u2
-    if (message.content.startsWith("!teststrike ")) {
-      try {
-        const member = await guild.members.fetch(message.author.id).catch(() => null);
-        if (!member || !isModeratorMember(member)) return message.reply("You must be a moderator to run this test.");
-        const mention = message.mentions.users.first();
-        if (!mention) return message.reply("Please mention a user: `!teststrike @user`");
-        await applyStrike({ guild, userId: mention.id, issuerId: message.author.id, reason: "Test strike" });
-        return message.reply(`Test strike applied to <@${mention.id}>.`);
-      } catch (e) {
-        console.error("!teststrike error:", e);
-        return message.reply("Test strike failed.");
-      }
-    }
-
-    if (message.content.startsWith("!testpair ")) {
-      try {
-        const member = await guild.members.fetch(message.author.id).catch(() => null);
-        if (!member || !isModeratorMember(member)) return message.reply("You must be a moderator to run this test.");
-        const mentions = message.mentions.users.map(u => u.id);
-        if (mentions.length < 2) return message.reply("Please mention two users: `!testpair @user1 @user2`");
-        const ch = await createPartnerChannel(guild, mentions[0], mentions[1], { type: "goal" });
-        return message.reply(`Test pairing created: ${ch ? ch.toString() : "failed"}`);
-      } catch (e) {
-        console.error("!testpair error:", e);
-        return message.reply("Test pair failed.");
-      }
+      return await message.reply(`Strike applied to <@${mention.id}> for: ${reason}`);
+    } catch (e) {
+      console.error("!strike error:", e);
+      return await message.reply("Couldn't apply strike. Check bot permissions.");
     }
   }
 
-}); // end messageCreate
+  // !strikes @user
+  if (message.content.startsWith("!strikes ")) {
+    try {
+      const member = await guild.members.fetch(message.author.id).catch(() => null);
+      if (!member || !isModeratorMember(member))
+        return await message.reply("You must be a moderator to run this command.");
+
+      const mention = message.mentions.users.first();
+      if (!mention) return await message.reply("Please mention a user: `!strikes @user`");
+
+      const rec =
+        strikes[guild.id]?.[mention.id] ?? { count: 0, history: [] };
+
+      let out = `⚖️ Strikes for <@${mention.id}>: ${rec.count}\nRecent history:\n`;
+      rec.history.slice(-10).forEach(
+        (h) =>
+          (out += `- ${h.time}: ${h.reason} (by ${h.issuer ? `<@${h.issuer}>` : "system"})\n`)
+      );
+
+      return await message.reply(out);
+    } catch (e) {
+      console.error("!strikes error:", e);
+      return await message.reply("Couldn't fetch strikes.");
+    }
+  }
+
+  // !clearstrikes @user
+  if (message.content.startsWith("!clearstrikes ")) {
+    try {
+      const member = await guild.members.fetch(message.author.id).catch(() => null);
+      if (!member || !isModeratorMember(member))
+        return await message.reply("You must be a moderator to run this command.");
+
+      const mention = message.mentions.users.first();
+      if (!mention) return await message.reply("Please mention a user: `!clearstrikes @user`");
+
+      if (strikes[guild.id]?.[mention.id]) {
+        delete strikes[guild.id][mention.id];
+        saveStrikes();
+        await notifyLoggingChannel(
+          guild,
+          `✅ <@${mention.id}>'s strikes cleared by <@${message.author.id}>.`
+        );
+        return await message.reply(`Strikes for <@${mention.id}> cleared.`);
+      } else {
+        return await message.reply("User has no strikes recorded.");
+      }
+    } catch (e) {
+      console.error("!clearstrikes error:", e);
+      return await message.reply("Couldn't clear strikes.");
+    }
+  }
+
+  // !blockpair @user
+  if (message.content.startsWith("!blockpair ")) {
+    try {
+      const member = await guild.members.fetch(message.author.id).catch(() => null);
+      if (!member || !isModeratorMember(member))
+        return await message.reply("You must be a moderator to run this command.");
+
+      const mention = message.mentions.users.first();
+      if (!mention) return await message.reply("Please mention a user: `!blockpair @user`");
+
+      const rec = ensureStrikeRecord(guild.id, mention.id);
+      rec.blockedFromMatching = true;
+      saveStrikes();
+
+      return await message.reply(`<@${mention.id}> has been blocked from future pairings.`);
+    } catch (e) {
+      console.error("!blockpair error:", e);
+      return await message.reply("Couldn't block user from pairing.");
+    }
+  }
+
+  // !unblockpair @user
+  if (message.content.startsWith("!unblockpair ")) {
+    try {
+      const member = await guild.members.fetch(message.author.id).catch(() => null);
+      if (!member || !isModeratorMember(member))
+        return await message.reply("You must be a moderator to run this command.");
+
+      const mention = message.mentions.users.first();
+      if (!mention) return await message.reply("Please mention a user: `!unblockpair @user`");
+
+      const rec = ensureStrikeRecord(guild.id, mention.id);
+      rec.blockedFromMatching = false;
+      saveStrikes();
+
+      return await message.reply(`<@${mention.id}> has been unblocked for future pairings.`);
+    } catch (e) {
+      console.error("!unblockpair error:", e);
+      return await message.reply("Couldn't unblock user from pairing.");
+    }
+  }
+
+  // Testing hooks: !teststrike @user
+  if (message.content.startsWith("!teststrike ")) {
+    try {
+      const member = await guild.members.fetch(message.author.id).catch(() => null);
+      if (!member || !isModeratorMember(member))
+        return await message.reply("You must be a moderator to run this test.");
+
+      const mention = message.mentions.users.first();
+      if (!mention) return await message.reply("Please mention a user: `!teststrike @user`");
+
+      await applyStrike({
+        guild,
+        userId: mention.id,
+        issuerId: message.author.id,
+        reason: "Test strike",
+      });
+
+      return await message.reply(`Test strike applied to <@${mention.id}>.`);
+    } catch (e) {
+      console.error("!teststrike error:", e);
+      return await message.reply("Test strike failed.");
+    }
+  }
+
+  // !testpair @user1 @user2
+  if (message.content.startsWith("!testpair ")) {
+    try {
+      const member = await guild.members.fetch(message.author.id).catch(() => null);
+      if (!member || !isModeratorMember(member))
+        return await message.reply("You must be a moderator to run this test.");
+
+      const mentions = message.mentions.users.map((u) => u.id);
+      if (!mentions || mentions.length < 2)
+        return await message.reply("Please mention two users: `!testpair @user1 @user2`");
+
+      const ch = await createPartnerChannel(guild, mentions[0], mentions[1], { type: "goal" });
+      return await message.reply(`Test pairing created: ${ch ? ch.toString() : "failed"}`);
+    } catch (e) {
+      console.error("!testpair error:", e);
+      return await message.reply("Test pair failed.");
+    }
+  }
+} // end guild check
+
 
 // ------------------ Interaction handling (slash commands) ------------------
 client.on("interactionCreate", async (interaction) => {
@@ -1163,7 +1266,10 @@ client.on("interactionCreate", async (interaction) => {
       const weekly = fitnessWeekly[uid] || { yes: 0, no: 0 };
       const monthly = fitnessMonthly[uid] || { yes: 0, no: 0 };
       const streak = weekly.yes - weekly.no;
-      await interaction.reply({ content: `📊 **Your Progress**\nWeekly → ✅ ${weekly.yes} | ❌ ${weekly.no}\nMonthly → ✅ ${monthly.yes} | ❌ ${monthly.no}\nStreak (weekly yes - no): ${streak}`, ephemeral: true });
+      await interaction.reply({
+        content: `📊 **Your Progress**\nWeekly → ✅ ${weekly.yes} | ❌ ${weekly.no}\nMonthly → ✅ ${monthly.yes} | ❌ ${monthly.no}\nStreak (weekly yes - no): ${streak}`,
+        ephemeral: true
+      });
       return;
     }
 
@@ -1179,9 +1285,8 @@ client.on("interactionCreate", async (interaction) => {
 
     // /partner group
     if (commandName === "partner") {
-      const sub = options.getSubcommand(false);
-      if (sub === "queue" || options.getSubcommand() === "queue") {
-        // prompt via ephemeral reply directing user to use prefix or bot will DM
+      const sub = options.getSubcommand(false) || options.getSubcommand();
+      if (sub === "queue") {
         try {
           await interaction.reply({ content: "I'll DM you to choose Goal or Future partner and add you to the queue.", ephemeral: true });
           const dm = await interaction.user.send("Which partner type would you like? Reply with `goal` or `future` (or `cancel`).");
@@ -1195,25 +1300,29 @@ client.on("interactionCreate", async (interaction) => {
           } else {
             await dm.channel.send("No response received — added to queue as Goal Partner by default.");
           }
+          if (!Array.isArray(partnerQueue)) partnerQueue = [];
           partnerQueue.push({ id: user.id, type: selection, joinedAt: new Date().toISOString() });
           savePartnerQueue();
           await dm.channel.send(`You've been added to the partner queue as **${selection}**. Standby.`);
         } catch (e) {
+          if (!Array.isArray(partnerQueue)) partnerQueue = [];
           partnerQueue.push({ id: user.id, type: "goal", joinedAt: new Date().toISOString() });
           savePartnerQueue();
           await interaction.editReply({ content: "Couldn't DM you — you've been added to the queue as a Goal Partner (ephemeral).", ephemeral: true });
         }
         return;
       }
+
       if (sub === "cancel") {
+        if (!Array.isArray(partnerQueue)) partnerQueue = [];
         const idx = partnerQueue.findIndex(x => x.id === user.id);
         if (idx === -1) return interaction.reply({ content: "You're not in the partner queue.", ephemeral: true });
         partnerQueue.splice(idx, 1);
         savePartnerQueue();
         return interaction.reply({ content: "You've been removed from the partner queue.", ephemeral: true });
       }
+
       if (sub === "end") {
-        // end partner
         try {
           const entry = Object.entries(partners).find(([chan, info]) => info.users.includes(user.id));
           if (!entry) return interaction.reply({ content: "You don't appear to have an active partner channel.", ephemeral: true });
@@ -1232,8 +1341,9 @@ client.on("interactionCreate", async (interaction) => {
           return interaction.reply({ content: "Failed to end partner pairing.", ephemeral: true });
         }
       }
+
       if (sub === "status") {
-        const queued = partnerQueue.length;
+        const queued = Array.isArray(partnerQueue) ? partnerQueue.length : 0;
         return interaction.reply({ content: `Partner queue length: ${queued}`, ephemeral: true });
       }
     }
@@ -1243,23 +1353,27 @@ client.on("interactionCreate", async (interaction) => {
       const subcmd = options.getSubcommand();
       const member = guild ? await guild.members.fetch(interaction.user.id).catch(() => null) : null;
       if (!member || !isModeratorMember(member)) return interaction.reply({ content: "You must be a moderator to use strike commands.", ephemeral: true });
+
+      const u = options.getUser("user");
+      if (!u) return interaction.reply({ content: "You must provide a user.", ephemeral: true });
+
       if (subcmd === "add") {
-        const u = options.getUser("user");
         const reason = options.getString("reason") || "Violation";
         await applyStrike({ guild, userId: u.id, issuerId: interaction.user.id, reason });
         return interaction.reply({ content: `Strike applied to <@${u.id}> for: ${reason}`, ephemeral: false });
       }
+
       if (subcmd === "check") {
-        const u = options.getUser("user");
         const rec = strikes[guild.id] && strikes[guild.id][u.id] ? strikes[guild.id][u.id] : { count: 0, history: [] };
         let out = `⚖️ Strikes for <@${u.id}>: ${rec.count}\nRecent:\n`;
         rec.history.slice(-10).forEach(h => out += `- ${h.time}: ${h.reason} (by ${h.issuer ? `<@${h.issuer}>` : "system"})\n`);
         return interaction.reply({ content: out, ephemeral: false });
       }
+
       if (subcmd === "clear") {
-        const u = options.getUser("user");
         if (strikes[guild.id] && strikes[guild.id][u.id]) {
-          delete strikes[guild.id][u.id]; saveStrikes();
+          delete strikes[guild.id][u.id];
+          saveStrikes();
           await notifyLoggingChannel(guild, `✅ <@${u.id}>'s strikes cleared by <@${interaction.user.id}>.`);
           return interaction.reply({ content: `Strikes for <@${u.id}> cleared.`, ephemeral: false });
         } else {
@@ -1274,6 +1388,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!member || !isModeratorMember(member)) return interaction.reply({ content: "You must be a moderator to run this test.", ephemeral: true });
       const u1 = options.getUser("user1");
       const u2 = options.getUser("user2");
+      if (!u1 || !u2) return interaction.reply({ content: "You must mention two users.", ephemeral: true });
       const ch = await createPartnerChannel(guild, u1.id, u2.id, { type: "goal" });
       return interaction.reply({ content: `Test pairing created: ${ch ? ch.toString() : "failed"}`, ephemeral: false });
     }
@@ -1283,13 +1398,20 @@ client.on("interactionCreate", async (interaction) => {
       const member = await guild.members.fetch(interaction.user.id).catch(() => null);
       if (!member || !isModeratorMember(member)) return interaction.reply({ content: "You must be a moderator to run this test.", ephemeral: true });
       const u = options.getUser("user");
+      if (!u) return interaction.reply({ content: "You must mention a user.", ephemeral: true });
       await applyStrike({ guild, userId: u.id, issuerId: interaction.user.id, reason: "Test strike" });
       return interaction.reply({ content: `Test strike applied to <@${u.id}>.`, ephemeral: false });
     }
 
   } catch (e) {
     console.error("interaction handler error:", e);
-    try { if (interaction.replied || interaction.deferred) await interaction.editReply("An error occurred."); else await interaction.reply({ content: "An error occurred.", ephemeral: true }); } catch {}
+    try {
+      if (interaction.replied || interaction.deferred) {
+        await interaction.editReply("An error occurred.");
+      } else {
+        await interaction.reply({ content: "An error occurred.", ephemeral: true });
+      }
+    } catch {}
   }
 });
 
