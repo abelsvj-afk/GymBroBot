@@ -1403,7 +1403,7 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ content: `Test strike applied to <@${u.id}>.`, ephemeral: false });
     }
 
-  } catch (e) {
+   } catch (e) {
     console.error("interaction handler error:", e);
     try {
       if (interaction.replied || interaction.deferred) {
@@ -1413,6 +1413,7 @@ client.on("interactionCreate", async (interaction) => {
       }
     } catch {}
   }
-});
+}); // <- closes interactionCreate listener
 
+// ------------------ Login ------------------
 client.login(process.env.DISCORD_TOKEN);
