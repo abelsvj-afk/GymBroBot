@@ -4,27 +4,30 @@ const app = express();
 app.get("/", (req, res) => res.send("GymBotBro is alive!"));
 app.listen(process.env.PORT || 3000, () => console.log("Server running"));
 
+
 // ------------------ Load Env Variables ------------------
 import dotenv from "dotenv";
 if (process.env.NODE_ENV !== "production") dotenv.config();
+
 
 // ------------------ Required Modules ------------------
 import fs from "fs";
 import path from "path";
 import {
-  Client,
-  GatewayIntentBits,
-  PermissionsBitField,
-  ChannelType,
-  Partials,
-  REST,
-  Routes,
-  EmbedBuilder,
- } from "discord.js";
+Client,
+GatewayIntentBits,
+PermissionsBitField,
+ChannelType,
+Partials,
+REST,
+Routes,
+EmbedBuilder,
+} from "discord.js";
 import OpenAI from "openai";
 import cron from "node-cron";
 import axios from "axios";
 import { google } from "googleapis";
+
 
 // ------------------ Debug Env Variables ------------------
 console.log("DISCORD_TOKEN:", process.env.DISCORD_TOKEN ? "✅ Exists" : "❌ Missing");
@@ -32,28 +35,32 @@ console.log("OPENAI_API_KEY:", process.env.OPENAI_API_KEY ? "✅ Exists" : "❌ 
 console.log("NEWS_API_KEY:", process.env.NEWS_API_KEY ? "✅ Exists" : "❌ Missing");
 console.log("YOUTUBE_API_KEY:", process.env.YOUTUBE_API_KEY ? "✅ Exists" : "❌ Missing");
 if (!process.env.DISCORD_TOKEN || !process.env.OPENAI_API_KEY) {
-  console.error("Critical environment variables missing! Exiting...");
-  process.exit(1);
+console.error("Critical environment variables missing! Exiting...");
+process.exit(1);
 }
+
 
 // ------------------ Discord Client (v14) ------------------
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.DirectMessages,
-  ],
-  partials: [Partials.Channel, Partials.Message, Partials.Reaction],
+intents: [
+GatewayIntentBits.Guilds,
+GatewayIntentBits.GuildMessages,
+GatewayIntentBits.MessageContent,
+GatewayIntentBits.GuildMembers,
+GatewayIntentBits.GuildMessageReactions,
+GatewayIntentBits.DirectMessages,
+],
+partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
+
 
 // ------------------ OpenAI Setup ------------------
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+
 // ------------------ YouTube API Setup ------------------
 const youtube = google.youtube({ version: "v3", auth: process.env.YOUTUBE_API_KEY });
+
 
 // ------------------ Files & Persistence ------------------
 const DATA_DIR = ".";
@@ -64,102 +71,6 @@ const FITNESS_MONTHLY_FILE = path.join(DATA_DIR, "fitnessMonthly.json");
 const PARTNER_QUEUE_FILE = path.join(DATA_DIR, "partnerQueue.json");
 const PARTNERS_FILE = path.join(DATA_DIR, "partners.json");
 const STRIKES_FILE = path.join(DATA_DIR, "strikes.json");
-
-// ensure files exist
-const ensureJSONFile = (p, fallback) => {
-  try {
-    if (!fs.existsSync(p)) fs.writeFileSync(p, JSON.stringify(fallback, null, 2));
-  } catch (e) {
-    console.error(`Failed to ensure ${p}:`, e);
-  }
-};
-ensureJSONFile(MEMORY_FILE, {});
-ensureJSONFile(BIRTHDAY_FILE, {});
-ensureJSONFile(FITNESS_WEEKLY_FILE, {});
-ensureJSONFile(FITNESS_MONTHLY_FILE, {});
-ensureJSONFile(PARTNER_QUEUE_FILE, []);
-ensureJSONFile(PARTNERS_FILE, {});
-ensureJSONFile(STRIKES_FILE, {});
-
-// helpers to read/write
-const readJSON = (p) => {
-  try {
-    return JSON.parse(fs.readFileSync(p, "utf8"));
-  } catch (e) {
-    console.error(`Failed reading ${p}`, e);
-    return null;
-  }
-};
-const writeJSON = (p, data) => {
-  try {
-    fs.writeFileSync(p, JSON.stringify(data, null, 2));
-  } catch (e) {
-    console.error(`Failed writing ${p}`, e);
-  }
-};
-
-// load into memory
-let memory = readJSON(MEMORY_FILE) || {};
-let birthdays = readJSON(BIRTHDAY_FILE) || {};
-let fitnessWeekly = readJSON(FITNESS_WEEKLY_FILE) || {};
-let fitnessMonthly = readJSON(FITNESS_MONTHLY_FILE) || {};
-let partnerQueue = readJSON(PARTNER_QUEUE_FILE) || []; // array of { id, type, joinedAt }
-let partners = readJSON(PARTNERS_FILE) || {}; // channelId -> metadata
-let strikes = readJSON(STRIKES_FILE) || {}; // guildId -> userId -> record
-
-// convenience save functions
-const saveMemory = () => writeJSON(MEMORY_FILE, memory);
-const saveBirthdays = () => writeJSON(BIRTHDAY_FILE, birthdays);
-const saveWeekly = () => writeJSON(FITNESS_WEEKLY_FILE, fitnessWeekly);
-const saveMonthly = () => writeJSON(FITNESS_MONTHLY_FILE, fitnessMonthly);
-const savePartnerQueue = () => writeJSON(PARTNER_QUEUE_FILE, partnerQueue);
-const savePartners = () => writeJSON(PARTNERS_FILE, partners);
-const saveStrikes = () => writeJSON(STRIKES_FILE, strikes);
-
-// ------------------ Config & Thresholds ------------------
-const STRIKE_CONFIG = {
-  warnCount: 1, // first strike -> warning DM
-  muteCount: 2, // second strike -> temporary mute (1 day)
-  endPartnerCount: 3, // third strike -> end partner and block from matching
-  banCount: 4, // fourth strike -> ban
-  muteDurationMs: 24 * 60 * 60 * 1000, // 24 hours
-  exposureUnlocks: [3, 8, 15], // counts of interaction to unlock tiers for Future partner
-};
-
-// ------------------ Utility helpers ------------------
-function ensureStrikeRecord(guildId, userId) {
-  if (!strikes[guildId]) strikes[guildId] = {};
-  if (!strikes[guildId][userId]) {
-    strikes[guildId][userId] = { count: 0, history: [], mutedUntil: null, blockedFromMatching: false };
-    saveStrikes();
-  }
-  return strikes[guildId][userId];
-}
-
-function isModeratorMember(member) {
-  try {
-    return member.permissions.has(PermissionsBitField.Flags.ManageMessages);
-  } catch {
-    return false;
-  }
-}
-
-async function notifyLoggingChannel(guild, embedOrContent) {
-  try {
-    const logging = guild.channels.cache.find(ch => (ch.name || "").toLowerCase() === "logging");
-    if (logging) {
-      if (embedOrContent instanceof EmbedBuilder) return logging.send({ embeds: [embedOrContent] });
-      return logging.send({ content: embedOrContent.toString() });
-    } else {
-      // fallback: DM owner
-      const owner = await guild.fetchOwner().catch(() => null);
-      if (owner && owner.user) {
-        try { await owner.user.send(`Logging fallback: ${typeof embedOrContent === "string" ? embedOrContent : JSON.stringify(embedOrContent)}`); } catch {}
-      }
-    }
-  } catch (e) {
-    console.error("notifyLoggingChannel error:", e);
-  }
 }
 
 // ------------------ OpenAI wrapper ------------------
@@ -1387,14 +1298,8 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.reply({ content: "An error occurred.", ephemeral: true });
       }
     } catch {}
-  }
-}); // <-- closes client.on("interactionCreate")
+ }); // ✅ closes properly
+
 
 // ------------------ Login ------------------
 client.login(process.env.DISCORD_TOKEN);
-
-// ------------------ Optional: Keep-alive (if using Railway/Glitch/etc) ------------------
-const app = express();
-app.get("/", (req, res) => res.send("GymBotBro is alive!"));
-app.listen(process.env.PORT || 3000, () => console.log("Server running"));
-
