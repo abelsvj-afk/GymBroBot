@@ -1415,9 +1415,6 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// Add these lines at the very end of your bot.js file:
-
-
 
 // Login (should be the last line)
 client.login(process.env.DISCORD_TOKEN);
