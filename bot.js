@@ -1295,7 +1295,11 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.editReply("An error occurred.");
       } else {
         await interaction.reply({ content: "An error occurred.", ephemeral: true });
-      } // closes last if
+      }
+    } catch (innerErr) {
+      console.error("Failed to reply to interaction error:", innerErr);
+    }
+  } // closes outer try/catch
 }); // closes client.on("interactionCreate")
 
 
