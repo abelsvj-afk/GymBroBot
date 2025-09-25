@@ -1415,6 +1415,4 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-
-// Login (should be the last line)
 client.login(process.env.DISCORD_TOKEN);
