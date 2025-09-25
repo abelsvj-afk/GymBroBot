@@ -1413,7 +1413,14 @@ client.on("interactionCreate", async (interaction) => {
       }
     } catch {}
   }
-}); // <- closes interactionCreate listener
+}); // <-- closes client.on("interactionCreate")
 
 // ------------------ Login ------------------
 client.login(process.env.DISCORD_TOKEN);
+
+// ------------------ Optional: Keep-alive (if using Railway/Glitch/etc) ------------------
+import express from "express";
+const app = express();
+app.get("/", (req, res) => res.send("GymBotBro is alive!"));
+app.listen(process.env.PORT || 3000, () => console.log("Server running"));
+
