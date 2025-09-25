@@ -612,7 +612,7 @@ async function registerSlashCommandsForGuild(guild) {
 }
 
 // ------------------ Bot ready ------------------
-client.once("clientready", async () => {
+client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   // register slash commands for every guild the bot is in
   for (const [guildId, guild] of client.guilds.cache) {
