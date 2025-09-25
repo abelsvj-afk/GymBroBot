@@ -651,21 +651,24 @@ client.once("ready", async () => {
   }, { timezone: "America/New_York" });
 
   // Sports updates 8am,12pm,4pm
-  const fightTimes = ["0 8 * * *", "0 12 * * *", "0 16 * * *"];
-  fightTimes.forEach(t => cron.schedule(t, async () => {
+const fightTimes = ["0 8 * * *", "0 12 * * *", "0 16 * * *"];
+fightTimes.forEach(t => {
+  cron.schedule(t, async () => {
     const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "sports");
     if (!ch) return;
     const u = await getSportsUpdates();
     await ch.send({ content: `🥊 Combat & Sports Update:\n${u}` });
   }, { timezone: "America/New_York" });
+});
 
-  // Fitness videos 12PM
-  cron.schedule("0 12 * * *", async () => {
-    const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "fitness");
-    if (!ch) return;
-    const videos = await getRandomFitnessVideos(Math.floor(Math.random() * 2) + 2);
-    for (const v of videos) await ch.send(v);
-  }, { timezone: "America/New_York" });
+// Fitness videos 12PM
+cron.schedule("0 12 * * *", async () => {
+  const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "fitness");
+  if (!ch) return;
+  const videos = await getRandomFitnessVideos(Math.floor(Math.random() * 2) + 2);
+  for (const v of videos) await ch.send(v);
+}, { timezone: "America/New_York" });
+
 
   // Birthday announcer 8AM
   cron.schedule("0 8 * * *", async () => {
