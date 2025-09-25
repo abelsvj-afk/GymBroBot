@@ -401,9 +401,7 @@ async function applyStrike({ guild, userId, issuerId = null, reason = "Violation
       sr.history.push({ time, reason: `${reason} (Immediate ban)`, issuer: issuerId });
       sr.blockedFromMatching = true;
       saveStrikes();
-      // DM notice
       try { (await client.users.fetch(userId)).send(`You have been banned from ${guild.name} for violating partner contact rules: ${reason}`); } catch {}
-      // attempt ban
       try {
         const member = await guild.members.fetch(userId).catch(() => null);
         if (member && guild.members.me.permissions.has(PermissionsBitField.Flags.BanMembers)) {
@@ -427,36 +425,27 @@ async function applyStrike({ guild, userId, issuerId = null, reason = "Violation
     sr.history.push({ time, reason, issuer: issuerId, channelId: channel ? channel.id : null });
     saveStrikes();
 
-    // send a warning DM for the first strike
+    // Warning DM
     if (sr.count >= STRIKE_CONFIG.warnCount && sr.count < STRIKE_CONFIG.muteCount) {
-      try { (await client.users.fetch(userId)).send(`⚠️ GymBroBot Warning in ${guild.name}: ${reason}\nThis is strike ${sr.count}. Repeated violations will escalate.`); } catch {}
-      const embed = new EmbedBuilder().setTitle("Strike Issued").setDescription(`<@${userId}> has been issued a warning (strike ${sr.count}).\nReason: ${reason}`).setColor(0xffa500).setTimestamp();
+      try { (await client.users.fetch(userId)).send(`⚠️ Warning in ${guild.name}: ${reason}\nThis is strike ${sr.count}. Repeated violations will escalate.`); } catch {}
+      const embed = new EmbedBuilder().setTitle("Strike Issued")
+        .setDescription(`<@${userId}> has been issued a warning (strike ${sr.count}).\nReason: ${reason}`)
+        .setColor(0xffa500)
+        .setTimestamp();
       await notifyLoggingChannel(guild, embed);
     }
 
-    // mute when reaching muteCount
+    // Mute
     if (sr.count >= STRIKE_CONFIG.muteCount && sr.count < STRIKE_CONFIG.endPartnerCount) {
-      // ensure Muted role exists
       let mutedRole = guild.roles.cache.find(r => r.name === "Muted");
       if (!mutedRole) {
-        try {
-          mutedRole = await guild.roles.create({ name: "Muted", reason: "Create muted role for strikes" });
-        } catch (e) {
-          console.error("Could not create Muted role:", e);
-          mutedRole = null;
-        }
+        try { mutedRole = await guild.roles.create({ name: "Muted", reason: "Create muted role for strikes" }); } catch (e) { console.error("Could not create Muted role:", e); mutedRole = null; }
       }
-      // try to deny send messages for muted role in all text channels (best-effort)
       if (mutedRole) {
         for (const [id, ch] of guild.channels.cache) {
-          try {
-            if (ch.type === ChannelType.GuildText || ch.type === ChannelType.GuildVoice) {
-              await ch.permissionOverwrites.edit(mutedRole, { SendMessages: false, AddReactions: false }, { reason: "Mute role update for strikes" });
-            }
-          } catch {}
+          try { if (ch.type === ChannelType.GuildText || ch.type === ChannelType.GuildVoice) await ch.permissionOverwrites.edit(mutedRole, { SendMessages: false, AddReactions: false }, { reason: "Mute role update for strikes" }); } catch {}
         }
       }
-      // assign role
       try {
         const member = await guild.members.fetch(userId).catch(() => null);
         if (member && mutedRole) {
@@ -466,81 +455,64 @@ async function applyStrike({ guild, userId, issuerId = null, reason = "Violation
           try { (await client.users.fetch(userId)).send(`🔇 You have been temporarily muted in ${guild.name} for ${STRIKE_CONFIG.muteDurationMs / (60*60*1000)} hours due to: ${reason}`); } catch {}
           await notifyLoggingChannel(guild, `🔇 <@${userId}> muted for ${STRIKE_CONFIG.muteDurationMs/1000/60/60}h (strike ${sr.count}).`);
         }
-      } catch (e) {
-        console.error("Mute assignment error:", e);
-      }
+      } catch (e) { console.error("Mute assignment error:", e); }
     }
 
-    // end partner & block
+    // End partner & block
     if (sr.count >= STRIKE_CONFIG.endPartnerCount && sr.count < STRIKE_CONFIG.banCount) {
       sr.blockedFromMatching = true;
       saveStrikes();
-      // end any partner channels user is in
       for (const [chanId, meta] of Object.entries(partners)) {
         if (meta.users && meta.users.includes(userId)) {
-          // try to fetch channel and end it
           const ch = await client.channels.fetch(chanId).catch(() => null);
-          if (ch) {
-            await endPartnerChannel(ch, `Ended due to repeated violations by <@${userId}>`);
-          } else {
-            delete partners[chanId];
-            savePartners();
-          }
+          if (ch) await endPartnerChannel(ch, `Ended due to repeated violations by <@${userId}>`);
+          else { delete partners[chanId]; savePartners(); }
         }
       }
-      await notifyLoggingChannel(guild, new EmbedBuilder().setTitle("Partner Ended & Blocked").setDescription(`<@${userId}> had partner channels ended and is blocked from future matching (strike ${sr.count}).`).setColor(0xff4500).setTimestamp());
+      await notifyLoggingChannel(guild, new EmbedBuilder().setTitle("Partner Ended & Blocked")
+        .setDescription(`<@${userId}> had partner channels ended and is blocked from future matching (strike ${sr.count}).`)
+        .setColor(0xff4500)
+        .setTimestamp());
       try { (await client.users.fetch(userId)).send(`🚫 Your partner pairing(s) have been ended and you are blocked from future pairings due to repeated violations.`); } catch {}
     }
 
-    // ban at highest threshold
+    // Ban at highest threshold
     if (sr.count >= STRIKE_CONFIG.banCount) {
       try {
         const member = await guild.members.fetch(userId).catch(() => null);
         if (member && guild.members.me.permissions.has(PermissionsBitField.Flags.BanMembers)) {
           await guild.members.ban(userId, { reason: `Reached strike threshold (${sr.count}).` });
-          await notifyLoggingChannel(guild, new EmbedBuilder().setTitle("User Banned").setDescription(`<@${userId}> was banned for reaching ${sr.count} strikes.`).setColor(0xff0000).setTimestamp());
-        } else {
-          await notifyLoggingChannel(guild, `Attempted ban for <@${userId}> but missing permission.`);
-        }
-      } catch (e) {
-        console.error("Ban attempt error:", e);
-      }
+          await notifyLoggingChannel(guild, new EmbedBuilder().setTitle("User Banned")
+            .setDescription(`<@${userId}> was banned for reaching ${sr.count} strikes.`)
+            .setColor(0xff0000)
+            .setTimestamp());
+        } else await notifyLoggingChannel(guild, `Attempted ban for <@${userId}> but missing permission.`);
+      } catch (e) { console.error("Ban attempt error:", e); }
     }
 
-  } catch (e) {
-    console.error("applyStrike error:", e);
-  }
+  } catch (e) { console.error("applyStrike error:", e); }
 }
 
-// scheduled job to unmute expired mutes
+// Scheduled unmute cron
 cron.schedule("*/5 * * * *", async () => {
-  // every 5 minutes check for expired mutes
-  try {
-    for (const [guildId, users] of Object.entries(strikes)) {
-      const guild = client.guilds.cache.get(guildId);
-      if (!guild) continue;
-      for (const [userId, record] of Object.entries(users)) {
-        if (record.mutedUntil && Date.now() > record.mutedUntil) {
-          // remove mutated role
-          try {
-            const mutedRole = guild.roles.cache.find(r => r.name === "Muted");
-            const member = await guild.members.fetch(userId).catch(() => null);
-            if (mutedRole && member) {
-              await member.roles.remove(mutedRole, "Mute expired - automatic unmute");
-            }
-          } catch (e) {
-            console.error("Auto unmute error:", e);
-          }
-          record.mutedUntil = null;
-          saveStrikes();
-          await notifyLoggingChannel(guild, `✅ <@${userId}> auto-unmuted after mute expiration.`);
-        }
+  for (const [guildId, users] of Object.entries(strikes)) {
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) continue;
+    for (const [userId, record] of Object.entries(users)) {
+      if (record.mutedUntil && Date.now() > record.mutedUntil) {
+        try {
+          const mutedRole = guild.roles.cache.find(r => r.name === "Muted");
+          const member = await guild.members.fetch(userId).catch(() => null);
+          if (mutedRole && member) await member.roles.remove(mutedRole, "Mute expired - automatic unmute");
+        } catch (e) { console.error("Auto unmute error:", e); }
+        record.mutedUntil = null;
+        saveStrikes();
+        await notifyLoggingChannel(guild, `✅ <@${userId}> auto-unmuted after mute expiration.`);
       }
     }
-  } catch (e) {
-    console.error("scheduled unmute error:", e);
   }
 }, { timezone: "America/New_York" });
+
 
 // ------------------ Slash commands registration (per-guild on ready) ------------------
 const SLASH_COMMANDS = [
