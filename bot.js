@@ -71,8 +71,7 @@ const FITNESS_MONTHLY_FILE = path.join(DATA_DIR, "fitnessMonthly.json");
 const PARTNER_QUEUE_FILE = path.join(DATA_DIR, "partnerQueue.json");
 const PARTNERS_FILE = path.join(DATA_DIR, "partners.json");
 const STRIKES_FILE = path.join(DATA_DIR, "strikes.json");
-  }
-};
+  };
 
 // ------------------ OpenAI wrapper ------------------
 async function getOpenAIResponse(prompt) {
