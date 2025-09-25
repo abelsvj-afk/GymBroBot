@@ -20,8 +20,7 @@ import {
   REST,
   Routes,
   EmbedBuilder,
-  Permissions,
-} from "discord.js";
+ } from "discord.js";
 import OpenAI from "openai";
 import cron from "node-cron";
 import axios from "axios";
