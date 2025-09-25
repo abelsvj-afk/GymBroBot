@@ -1297,7 +1297,7 @@ client.on("interactionCreate", async (interaction) => {
         await interaction.reply({ content: "An error occurred.", ephemeral: true });
       }
     } catch {}
- }); // ✅ closes properly
+ // ✅ closes properly
 
 
 // ------------------ Login ------------------
