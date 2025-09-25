@@ -58,8 +58,8 @@ partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 
-// ------------------ YouTube API Setup ------------------
 const youtube = google.youtube({ version: "v3", auth: process.env.YOUTUBE_API_KEY });
+// ------------------ YouTube API Setup ------------------
 
 
 // ------------------ Files & Persistence ------------------
