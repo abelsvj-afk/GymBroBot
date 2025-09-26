@@ -266,8 +266,8 @@ async function getRandomFitnessVideos(count = 2) {
     const items = res.data.items || [];
     if (!items.length) return ["No fitness videos found today."];
     const shuffled = items.sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, count).map(i => `  ️‍♂️ ${i.snippet.title}
-https://www.youtube.com/watch?v=${i.id.videoId}`);
+    return shuffled.slice(0, count).map(i => `🏋️‍♂️ ${i.snippet.title}\nhttps://www.youtube.com/watch?v=${i.id.videoId}`);
+
   } catch (e) {
     console.error("YouTube error:", e.message);
     return ["Error fetching videos from YouTube."];
@@ -1380,6 +1380,20 @@ if (message.content === "!challenges") {
   return message.reply(msg);
 }
  
+// !setgoal command
+if (message.content.startsWith("!setgoal ")) {
+  const goalNumber = parseInt(message.content.split(" ")[1]);
+  if (isNaN(goalNumber) || goalNumber <= 0) {
+    return message.reply("Please provide a valid number for your weekly workout goal, e.g., `!setgoal 5`.");
+  }
+
+  if (!memory.goals) memory.goals = {};
+  memory.goals[authorId] = goalNumber;
+  saveMemory(); // Make sure goals are saved
+
+  return message.reply(`✅ Your weekly workout goal has been set to **${goalNumber}** workouts! Use \`!goal\` to track your progress.`);
+}
+
 // !goal command
 if (message.content === "!goal") {
   const goal = memory.goals?.[authorId];
