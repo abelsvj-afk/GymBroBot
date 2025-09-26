@@ -1301,7 +1301,108 @@ client.on("interactionCreate", async (interaction) => {
     }
   } // closes outer try/catch
 }); // closes client.on("interactionCreate")
+// Add this to the end of your bot.js file to complete the missing parts:
 
+// ------------------ Data persistence & helper functions ------------------
+let memory = {};
+let birthdays = {};
+let fitnessWeekly = {};
+let fitnessMonthly = {};
+let partnerQueue = [];
+let partners = {};
+let strikes = {};
+
+// Strike configuration
+const STRIKE_CONFIG = {
+  warnCount: 1,
+  muteCount: 2,
+  endPartnerCount: 3,
+  banCount: 4,
+  muteDurationMs: 2 * 60 * 60 * 1000, // 2 hours
+  exposureUnlocks: [5, 10, 15] // interactions needed for future partner reveals
+};
+
+// Load data functions
+function loadData() {
+  try {
+    if (fs.existsSync(MEMORY_FILE)) memory = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
+    if (fs.existsSync(BIRTHDAY_FILE)) birthdays = JSON.parse(fs.readFileSync(BIRTHDAY_FILE, 'utf8'));
+    if (fs.existsSync(FITNESS_WEEKLY_FILE)) fitnessWeekly = JSON.parse(fs.readFileSync(FITNESS_WEEKLY_FILE, 'utf8'));
+    if (fs.existsSync(FITNESS_MONTHLY_FILE)) fitnessMonthly = JSON.parse(fs.readFileSync(FITNESS_MONTHLY_FILE, 'utf8'));
+    if (fs.existsSync(PARTNER_QUEUE_FILE)) partnerQueue = JSON.parse(fs.readFileSync(PARTNER_QUEUE_FILE, 'utf8'));
+    if (fs.existsSync(PARTNERS_FILE)) partners = JSON.parse(fs.readFileSync(PARTNERS_FILE, 'utf8'));
+    if (fs.existsSync(STRIKES_FILE)) strikes = JSON.parse(fs.readFileSync(STRIKES_FILE, 'utf8'));
+  } catch (e) {
+    console.error("Error loading data:", e);
+  }
+}
+
+// Save data functions
+function saveMemory() { try { fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2)); } catch (e) { console.error("Save memory error:", e); } }
+function saveBirthdays() { try { fs.writeFileSync(BIRTHDAY_FILE, JSON.stringify(birthdays, null, 2)); } catch (e) { console.error("Save birthdays error:", e); } }
+function saveWeekly() { try { fs.writeFileSync(FITNESS_WEEKLY_FILE, JSON.stringify(fitnessWeekly, null, 2)); } catch (e) { console.error("Save weekly error:", e); } }
+function saveMonthly() { try { fs.writeFileSync(FITNESS_MONTHLY_FILE, JSON.stringify(fitnessMonthly, null, 2)); } catch (e) { console.error("Save monthly error:", e); } }
+function savePartnerQueue() { try { fs.writeFileSync(PARTNER_QUEUE_FILE, JSON.stringify(partnerQueue, null, 2)); } catch (e) { console.error("Save queue error:", e); } }
+function savePartners() { try { fs.writeFileSync(PARTNERS_FILE, JSON.stringify(partners, null, 2)); } catch (e) { console.error("Save partners error:", e); } }
+function saveStrikes() { try { fs.writeFileSync(STRIKES_FILE, JSON.stringify(strikes, null, 2)); } catch (e) { console.error("Save strikes error:", e); } }
+
+// Helper functions
+function ensureStrikeRecord(guildId, userId) {
+  if (!strikes[guildId]) strikes[guildId] = {};
+  if (!strikes[guildId][userId]) strikes[guildId][userId] = { count: 0, history: [], blockedFromMatching: false, mutedUntil: null };
+  return strikes[guildId][userId];
+}
+
+function isModeratorMember(member) {
+  try {
+    return member.permissions.has(PermissionsBitField.Flags.ManageMessages);
+  } catch {
+    return false;
+  }
+}
+
+async function notifyLoggingChannel(guild, content) {
+  const logChannel = guild.channels.cache.find(ch => (ch.name || "").toLowerCase().includes("log") || (ch.name || "").toLowerCase() === "mod-logs");
+  if (logChannel) {
+    try {
+      if (typeof content === "string") {
+        await logChannel.send(content);
+      } else {
+        await logChannel.send({ embeds: [content] });
+      }
+    } catch (e) {
+      console.error("Log channel send error:", e);
+    }
+  }
+}
+
+// Load data on startup
+loadData();
+
+// Graceful shutdown
+process.on('SIGINT', () => {
+  console.log('Received SIGINT. Saving data and shutting down gracefully...');
+  saveMemory();
+  saveBirthdays();
+  saveWeekly();
+  saveMonthly();
+  savePartnerQueue();
+  savePartners();
+  saveStrikes();
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('Received SIGTERM. Saving data and shutting down gracefully...');
+  saveMemory();
+  saveBirthdays();
+  saveWeekly();
+  saveMonthly();
+  savePartnerQueue();
+  savePartners();
+  saveStrikes();
+  process.exit(0);
+});
 
 // ------------------ Login ------------------
 client.login(process.env.DISCORD_TOKEN);
