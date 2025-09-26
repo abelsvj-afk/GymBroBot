@@ -69,6 +69,16 @@ const STRIKE_CONFIG = {
   exposureUnlocks: [5, 10, 15]
 };
 
+// ------------------ Ensure Data Directory Exists ------------------
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    console.log(`Created data directory: ${DATA_DIR}`);
+  }
+} catch (e) {
+  console.error("Failed to create data directory:", e);
+}
+
 // ------------------ Data Persistence Functions ------------------
 function loadData() {
   try {
@@ -206,6 +216,11 @@ const client = new Client({
   ],
   partials: [Partials.Channel, Partials.Message, Partials.Reaction],
 });
+ 
+// ------------------ Heartbeat Monitoring ------------------
+setInterval(() => {
+  console.log(`Bot heartbeat: ${new Date().toISOString()} - Memory usage: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`);
+}, 60000); // Log every minute
 
 // ------------------ OpenAI & API Setup ------------------
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -1919,7 +1934,6 @@ client.on("guildCreate", async (guild) => {
 • \`!addhabit\` - Track daily habits
 • \`!workoutplan\` - Get workout routines` }
         )
-
         .setColor(0x00AE86)
         .setTimestamp();
       
@@ -1930,8 +1944,25 @@ client.on("guildCreate", async (guild) => {
   }
 });
 
+// ------------------ Global Error Handlers ------------------
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  // Continue running despite the error
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Continue running despite the error
+});
+
 // End of all event handlers and functions
 
 // ------------------ Bot Login ------------------
-client.login(process.env.DISCORD_TOKEN);
-          
+client.login(process.env.DISCORD_TOKEN)
+  .then(() => {
+    console.log('Bot successfully logged in');
+  })
+  .catch(error => {
+    console.error('Failed to log in:', error);
+  });
+
