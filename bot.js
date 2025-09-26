@@ -306,7 +306,7 @@ function buildLeaderboardMessage() {
   const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
   if (sorted.length === 0) leaderboardMsg += "No data yet.";
   sorted.forEach(([uid, data], idx) => {
-    const medals = ["  ", "  ", "  "];
+    const medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"];
     const flair = idx < 3 ? medals[idx] : "  ";
     const weeklyCount = fitnessWeekly[uid] ? fitnessWeekly[uid].yes : 0;
     leaderboardMsg += `${flair} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no} (Weekly: ✅${weeklyCount})\n`;
@@ -780,7 +780,7 @@ cron.schedule("0 0 * * 0", async () => {
   if (sorted.length) msg += `   <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
   msg += `\n   Weekly Top 5 (TEST):\n`;
 
-  const medals = ["  ", "  ", "  ", "  ", "  "];
+  const medals = ["🥇", "🥈", "🥉", "🏅", "💪"];
 
   sorted.slice(0, 5).forEach(([uid, data], idx) => {
     msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
@@ -804,8 +804,9 @@ cron.schedule("0 0 1 * *", async () => {
   if (sorted.length) msg += `   <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
   msg += `\n   Monthly Top 5:\n`;
 
+  const medals = ["🥇", "🥈", "🥉", "🏅", "💪"];
+
   sorted.slice(0,5).forEach(([uid, data], idx) => {
-    const medals = ["  ","  ","  ","  ","  "];
     msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
   });
 
@@ -815,6 +816,7 @@ cron.schedule("0 0 1 * *", async () => {
   for (const uid in fitnessMonthly) fitnessMonthly[uid] = { yes: 0, no: 0 };
   saveMonthly();
 }, { timezone: "America/New_York" });
+
 
 
 // ------------------ Message Event Handler ------------------
@@ -919,7 +921,7 @@ client.on("messageCreate", async (message) => {
         fitnessWeekly[authorId].yes += 1;
         fitnessMonthly[authorId].yes += 1;
         const encouragements = ['Beast mode!', 'Keep crushing it!', 'Unstoppable!', 'Champion mindset!'];
-        message.react('  ');
+        message.react('💪');
         setTimeout(() => message.reply(encouragements[Math.floor(Math.random() * encouragements.length)]), 1000);
       } else if (hasNegative && !hasPositive) {
         fitnessWeekly[authorId].no += 1;
@@ -1255,54 +1257,52 @@ if (message.content === "!stats") {
   const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
   const position = sorted.findIndex(([uid]) => uid === authorId) + 1;
 
-  let msg = `   **${message.author.username}'s Stats** 
+  let msg = `🏆 **${message.author.username}'s Stats** 
 `;
 
-msg += `**Fitness:**
+  msg += `**Fitness:**
 `;
-msg += `• This week: ✅${weekly.yes} ❌${weekly.no}
+  msg += `• This week: ✅${weekly.yes} ❌${weekly.no}
 `;
-msg += `• This month: ✅${monthly.yes} ❌${monthly.no}
+  msg += `• This month: ✅${monthly.yes} ❌${monthly.no}
 `;
-msg += `• Success rate: ${monthly.yes + monthly.no > 0 ? Math.round((monthly.yes / (monthly.yes + monthly.no)) * 100) : 0}%
+  msg += `• Success rate: ${monthly.yes + monthly.no > 0 ? Math.round((monthly.yes / (monthly.yes + monthly.no)) * 100) : 0}%
 `;
-msg += `• Leaderboard position: ${position > 0 ? `#${position}` : 'Unranked'}
+  msg += `• Leaderboard position: ${position > 0 ? `#${position}` : 'Unranked'}
 
 `;
 
-if (Object.keys(habits).length > 0) {
-  msg += `**Habits:**
+  if (Object.keys(habits).length > 0) {
+    msg += `**Habits:**
 `;
-  Object.entries(habits).forEach(([habit, data]) => {
-    const today = new Date().toDateString();
-    const checkedToday = data.lastChecked === today ? " ✅" : "";
-    msg += `• ${habit}: ${data.streak}   (${data.total} total)${checkedToday}
+    Object.entries(habits).forEach(([habit, data]) => {
+      const today = new Date().toDateString();
+      const checkedToday = data.lastChecked === today ? " ✅" : "";
+      msg += `• ${habit}: ${data.streak} day streak (${data.total} total)${checkedToday}
 `;
-  });
-} else {
-  msg += `**Habits:** None tracked yet. Use \`!addhabit [habit]\` to start!
+    });
+  } else {
+    msg += `**Habits:** None tracked yet. Use \`!addhabit [habit]\` to start!
 `;
-}
+  }
 
-// Show active challenges
-const userChallenges = Object.entries(challenges).filter(([id, chal]) =>
-  chal.participants.includes(authorId) && chal.guildId === guild?.id
-);
+  // Show active challenges
+  const userChallenges = Object.entries(challenges).filter(([id, chal]) =>
+    chal.participants.includes(authorId) && chal.guildId === guild?.id
+  );
 
-if (userChallenges.length > 0) {
-  msg += `
+  if (userChallenges.length > 0) {
+    msg += `
 **Active Challenges:** ${userChallenges.length}
 `;
-  userChallenges.slice(0, 3).forEach(([id, chal]) => {
-    msg += `• ${chal.name}
+    userChallenges.slice(0, 3).forEach(([id, chal]) => {
+      msg += `• ${chal.name}
 `;
-  });
+    });
+  }
+
+  return message.reply(msg);
 }
-
-return message.reply(msg);
-
-
-// Separate challenge commands:
 
 // !challenge create (mod only)
 if (message.content.startsWith("!challenge create ")) {
@@ -1325,13 +1325,13 @@ if (message.content.startsWith("!challenge create ")) {
   saveChallenges();
 
   const embed = new EmbedBuilder()
-    .setTitle("   NEW CHALLENGE CREATED!")
+    .setTitle("🏆 NEW CHALLENGE CREATED!")
     .setDescription(challengeText)
     .setColor(0x00AE86)
-    .setFooter({ text: `React with    to join! ID: ${challengeId}` });
+    .setFooter({ text: `React with 💪 to join! ID: ${challengeId}` });
 
   const msg = await message.channel.send({ embeds: [embed] });
-  await msg.react('  ');
+  await msg.react('💪');
   return;
 }
 
@@ -1356,7 +1356,7 @@ if (message.content === "!challenges") {
 
   if (!guildChallenges.length) return message.reply("No active challenges.");
 
-  let msg = `   Active Challenges:\n`;
+  let msg = `🏆 Active Challenges:\n`;
   guildChallenges.forEach(([id, chal]) => {
     msg += `• **${chal.name}** (${chal.participants.length} participants) - ID: ${id}\n`;
   });
@@ -1364,9 +1364,7 @@ if (message.content === "!challenges") {
 
   return message.reply(msg);
 }
-
-
-
+ 
 // !goal command
 if (message.content === "!goal") {
   const goal = memory.goals?.[authorId];
@@ -1378,19 +1376,20 @@ if (message.content === "!goal") {
   const remaining = 10 - completed;
   const bar = "█".repeat(completed) + "░".repeat(remaining);
 
-  let statusEmoji = "  ";
-  let message_text = "";
+  // Status + message setup
+let statusEmoji = "🏋️";  // default
+let message_text = "";
 
-  if (percent >= 100) {
-    statusEmoji = "  ";
-    message_text = " - GOAL CRUSHED!   ";
-  } else if (percent >= 80) {
-    statusEmoji = "  ";
-    message_text = " - Almost there!";
-  } else if (percent >= 50) {
-    statusEmoji = "⚡";
-    message_text = " - Keep pushing!";
-  }
+if (percent >= 100) {
+  statusEmoji = "🏆";
+  message_text = " - GOAL CRUSHED! 💯";
+} else if (percent >= 80) {
+  statusEmoji = "🔥";
+  message_text = " - Almost there!";
+} else if (percent >= 50) {
+  statusEmoji = "⚡";
+  message_text = " - Keep pushing!";
+} 
 
   return message.reply(`${statusEmoji} **Weekly Goal Progress**
 ${current}/${goal} workouts (${percent}%)${message_text}
@@ -1867,9 +1866,9 @@ client.on("messageReactionAdd", async (reaction, user) => {
   }
 
   // Handle challenge join reactions
-  if (reaction.emoji.name === '  ') {
+  if (reaction.emoji.name === '💪') {
     const message = reaction.message;
-    if (message.embeds.length > 0 && message.embeds[0].title === "   NEW CHALLENGE CREATED!") {
+    if (message.embeds.length > 0 && message.embeds[0].title === "🏆 NEW CHALLENGE CREATED!") {
       const footer = message.embeds[0].footer?.text;
       if (footer) {
         const challengeId = footer.split("ID: ")[1];
@@ -1930,6 +1929,8 @@ client.on("guildCreate", async (guild) => {
     console.error("Failed to send welcome message:", e);
   }
 });
+
+// End of all event handlers and functions
 
 // ------------------ Bot Login ------------------
 client.login(process.env.DISCORD_TOKEN);
