@@ -181,7 +181,7 @@ async function checkRoleRewards(userId, guild) {
           await member.roles.add(role, `Earned ${roleData.name} with ${total} workouts`);
           const channel = guild.channels.cache.find(ch => ch.name?.toLowerCase() === "general");
           if (channel) {
-            await channel.send(`🎉 <@${userId}> earned the **${roleData.name}** role! ${total} workouts completed!`);
+            await channel.send(`   <@${userId}> earned the **${roleData.name}** role! ${total} workouts completed!`);
           }
         } catch (e) {
           console.error("Role assignment failed:", e);
@@ -251,7 +251,7 @@ async function getRandomFitnessVideos(count = 2) {
     const items = res.data.items || [];
     if (!items.length) return ["No fitness videos found today."];
     const shuffled = items.sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, count).map(i => `🏋️‍♂️ ${i.snippet.title}
+    return shuffled.slice(0, count).map(i => `  ️‍♂️ ${i.snippet.title}
 https://www.youtube.com/watch?v=${i.id.videoId}`);
   } catch (e) {
     console.error("YouTube error:", e.message);
@@ -264,7 +264,7 @@ async function getHealthNews() {
   try {
     const res = await axios.get(`https://newsapi.org/v2/top-headlines?category=health&language=en&apiKey=${process.env.NEWS_API_KEY}`);
     const top = res.data.articles?.[0];
-    return top ? `📰 **${top.title}**
+    return top ? `   **${top.title}**
 ${top.description || ""}
 ${top.url}` : "No health news today.";
   } catch (e) {
@@ -302,12 +302,12 @@ async function getSportsUpdates() {
 
 // ------------------ Leaderboard utilities ------------------
 function buildLeaderboardMessage() {
-  let leaderboardMsg = "**🏆 Fitness Leaderboard (Daily Snapshot) 🏆**\n\n";
+  let leaderboardMsg = "**   Fitness Leaderboard (Daily Snapshot)   **\n\n";
   const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
   if (sorted.length === 0) leaderboardMsg += "No data yet.";
   sorted.forEach(([uid, data], idx) => {
-    const medals = ["🥇", "🥈", "🥉"];
-    const flair = idx < 3 ? medals[idx] : "💪";
+    const medals = ["  ", "  ", "  "];
+    const flair = idx < 3 ? medals[idx] : "  ";
     const weeklyCount = fitnessWeekly[uid] ? fitnessWeekly[uid].yes : 0;
     leaderboardMsg += `${flair} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no} (Weekly: ✅${weeklyCount})\n`;
   });
@@ -529,8 +529,8 @@ Reason: ${reason}`)
           await member.roles.add(mutedRole, `Temporary mute - strike ${sr.count}`);
           sr.mutedUntil = Date.now() + STRIKE_CONFIG.muteDurationMs;
           saveStrikes();
-          try { (await client.users.fetch(userId)).send(`🔇 You have been temporarily muted in ${guild.name} for ${STRIKE_CONFIG.muteDurationMs / (60*60*1000)} hours due to: ${reason}`); } catch {}
-          await notifyLoggingChannel(guild, `🔇 <@${userId}> muted for ${STRIKE_CONFIG.muteDurationMs/1000/60/60}h (strike ${sr.count}).`);
+          try { (await client.users.fetch(userId)).send(`   You have been temporarily muted in ${guild.name} for ${STRIKE_CONFIG.muteDurationMs / (60*60*1000)} hours due to: ${reason}`); } catch {}
+          await notifyLoggingChannel(guild, `   <@${userId}> muted for ${STRIKE_CONFIG.muteDurationMs/1000/60/60}h (strike ${sr.count}).`);
         }
       } catch (e) { console.error("Mute assignment error:", e); }
     }
@@ -551,7 +551,7 @@ Reason: ${reason}`)
         .setDescription(`<@${userId}> had partner channels ended and is blocked from future matching (strike ${sr.count}).`)
         .setColor(0xff4500)
         .setTimestamp());
-      try { (await client.users.fetch(userId)).send(`🚫 Your partner pairing(s) have been ended and you are blocked from future pairings due to repeated violations.`); } catch {}
+      try { (await client.users.fetch(userId)).send(`   Your partner pairing(s) have been ended and you are blocked from future pairings due to repeated violations.`); } catch {}
     }
 
     if (sr.count >= STRIKE_CONFIG.banCount) {
@@ -590,19 +590,6 @@ cron.schedule("*/5 * * * *", async () => {
   }
 }, { timezone: "America/New_York" });
 
-// ------------------ Slash Commands ------------------
-const SLASH_COMMANDS = [
-  {
-    name: "strike",
-    description: "Manage strikes",
-    type: 1,
-    options: [
-      {
-        name: "add",
-        description: "Add a strike to a user",
-        type: 1,
-        options: [
-          { name: "user", description: "The user to strike", type: 6, required: true },
 // ------------------ Slash Commands ------------------
 const SLASH_COMMANDS = [
   {
@@ -681,20 +668,20 @@ client.once("ready", async () => {
 
   // Pin guide messages for channels
   const howToMessages = {
-    general: "💡 **Welcome to General!** Chat freely. Use `setbirthday MM-DD` to register birthdays. Bot will remind on their day! 🎉",
-    welcome: "💡 **Welcome Channel:** Introduce yourself & get guidance.",
-    announcements: "💡 **Announcements:** Important updates posted here.",
-    "daily-check-ins": "💡 **Daily Check-Ins:** Post workouts/motivation. E.g., `Did a 30-min run today!` 💪 • Commands: `!coach`, `!progress`",
-    "tips and guide": "💡 **Tips & Guide:** Ask about fitness, health, style, faith, or wealth. Use `!coach` for quick motivation.",
-    faith: "💡 **Faith:** Questions about Christianity, prayer, scripture. Example: `How can I strengthen my prayer life?`",
-    "mens-style": "💡 **Men's Style:** Ask about fashion & style tips.",
-    "open-up": "💡 **Open Up:** Share struggles or mental health concerns respectfully.",
-    health: "💡 **Health:** Ask about wellness, diet, remedies, superfoods.",
-    wealth: "💡 **Wealth:** Investing, business, money management. Tip posted daily at 11AM ET.",
-    sports: "💡 **Sports:** MMA, boxing, Muay Thai, combat sports updates.",
-    fitness: "💡 **Fitness:** Log workouts daily, see leaderboard, check-ins posted automatically.",
-    leaderboard: "💡 **Leaderboard:** Public leaderboard updates weekly & monthly. No spam in this channel.",
-    "accountability-lounge": "🔍 **Accountability Lounge:** Use `/partner queue` or `!findpartner` to join. Choose **Goal** or **Future** partner. DO NOT contact your partner outside your private partner channel. Violations result in strikes or ban.",
+    general: "   **Welcome to General!** Chat freely. Use `setbirthday MM-DD` to register birthdays. Bot will remind on their day!   ",
+    welcome: "   **Welcome Channel:** Introduce yourself & get guidance.",
+    announcements: "   **Announcements:** Important updates posted here.",
+    "daily-check-ins": "   **Daily Check-Ins:** Post workouts/motivation. E.g., `Did a 30-min run today!`    • Commands: `!coach`, `!progress`",
+    "tips and guide": "   **Tips & Guide:** Ask about fitness, health, style, faith, or wealth. Use `!coach` for quick motivation.",
+    faith: "   **Faith:** Questions about Christianity, prayer, scripture. Example: `How can I strengthen my prayer life?`",
+    "mens-style": "   **Men's Style:** Ask about fashion & style tips.",
+    "open-up": "   **Open Up:** Share struggles or mental health concerns respectfully.",
+    health: "   **Health:** Ask about wellness, diet, remedies, superfoods.",
+    wealth: "   **Wealth:** Investing, business, money management. Tip posted daily at 11AM ET.",
+    sports: "   **Sports:** MMA, boxing, Muay Thai, combat sports updates.",
+    fitness: "   **Fitness:** Log workouts daily, see leaderboard, check-ins posted automatically.",
+    leaderboard: "   **Leaderboard:** Public leaderboard updates weekly & monthly. No spam in this channel.",
+    "accountability-lounge": "   **Accountability Lounge:** Use `/partner queue` or `!findpartner` to join. Choose **Goal** or **Future** partner. DO NOT contact your partner outside your private partner channel. Violations result in strikes or ban.",
   };
 
   for (const [name, message] of Object.entries(howToMessages)) {
@@ -723,115 +710,112 @@ client.once("ready", async () => {
   }
 }
 
-  // ------------------ Cron Jobs Setup ------------------
-  
-  // Check-in reminders at 7am, 10am, 2pm, 6pm, 9pm ET
-  const checkInTimes = ["0 7 * * *", "0 10 * * *", "0 14 * * *", "0 18 * * *", "0 21 * * *"];
-  checkInTimes.forEach(time => {
-    cron.schedule(time, async () => {
-      const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "daily-check-ins");
-      if (ch) await ch.send("💪 Time for your check-in! Log your progress and stay accountable!");
-    }, { timezone: "America/New_York" });
-  });
+  // ------------------ Cron Jobs Setup ------------------ 
 
-  // Daily wealth tip 11AM
-  cron.schedule("0 11 * * *", async () => {
-    const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "wealth");
-    if (!ch) return;
-    const tip = await getOpenAIResponse("Provide a practical daily wealth tip for investing, business, money management, stocks, crypto, life insurance, entrepreneurship, leveraging debt, LLCs, banking, and financial growth.");
-    await ch.send({ content: `💰 Daily Wealth Tip:
-${tip}` });
-  }, { timezone: "America/New_York" });
-
-  // Daily health news 10AM
-  cron.schedule("0 10 * * *", async () => {
-    const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "health");
-    if (!ch) return;
-    const news = await getHealthNews();
-    await ch.send({ content: `🏥 Daily Health News:
-${news}` });
-  }, { timezone: "America/New_York" });
-
-  // Sports updates 8am, 12pm, 4pm
-  const fightTimes = ["0 8 * * *", "0 12 * * *", "0 16 * * *"];
-  fightTimes.forEach(t => {
-    cron.schedule(t, async () => {
-      const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "sports");
-      if (!ch) return;
-      const u = await getSportsUpdates();
-      await ch.send({ content: `🥊 Combat & Sports Update:
-${u}` });
-    }, { timezone: "America/New_York" });
-  });
-
-  // Fitness videos 12PM
-  cron.schedule("0 12 * * *", async () => {
-    const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "fitness");
-    if (!ch) return;
-    const videos = await getRandomFitnessVideos(Math.floor(Math.random() * 2) + 2);
-    for (const v of videos) await ch.send(v);
-  }, { timezone: "America/New_York" });
-
-  // Birthday announcer 8AM
-  cron.schedule("0 8 * * *", async () => {
-    const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "general");
-    if (!ch) return;
-    const today = new Date();
-    const mmdd = `${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
-    for (const [uid, date] of Object.entries(birthdays)) {
-      const birthMd = date.slice(5);
-      if (birthMd === mmdd) {
-        await ch.send(`🎉 Today is <@${uid}>'s birthday! Go shout them a happy birthday! 💪`);
-      }
-    }
-  }, { timezone: "America/New_York" });
-
-  // Weekly leaderboard Sunday midnight ET
-  cron.schedule("0 0 * * 0", async () => {
-    const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "leaderboard");
-    if (!ch) return;
-    const sorted = Object.entries(fitnessWeekly).sort((a,b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
-    let msg = "**🏅 Weekly Fitness Winner 🏅**
-";
-    if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}
-`;
-    msg += "
-💥 Weekly Top 5:
-";
-    sorted.slice(0,5).forEach(([uid, data], idx) => {
-      const medals = ["🥇","🥈","🥉","🏋️","💪"];
-      msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}
-`;
-    });
-    await ch.send({ content: msg });
-    // Reset weekly
-    for (const uid in fitnessWeekly) fitnessWeekly[uid] = { yes: 0, no: 0 };
-    saveWeekly();
-  }, { timezone: "America/New_York" });
-
-  // Monthly leaderboard 1st midnight ET
-  cron.schedule("0 0 1 * *", async () => {
-    const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "leaderboard");
-    if (!ch) return;
-    const sorted = Object.entries(fitnessMonthly).sort((a,b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
-    let msg = "**🏆 Monthly Fitness Winner 🏆**
-";
-    if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}
-`;
-    msg += "
-🔥 Monthly Top 5:
-";
-    sorted.slice(0,5).forEach(([uid, data], idx) => {
-      const medals = ["🥇","🥈","🥉","🏆","💪"];
-      msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}
-`;
-    });
-    await ch.send({ content: msg });
-    // Reset monthly
-    for (const uid in fitnessMonthly) fitnessMonthly[uid] = { yes: 0, no: 0 };
-    saveMonthly();
+// Check-in reminders at 7am, 10am, 2pm, 6pm, 9pm ET
+const checkInTimes = ["0 7 * * *", "0 10 * * *", "0 14 * * *", "0 18 * * *", "0 21 * * *"];
+checkInTimes.forEach(time => {
+  cron.schedule(time, async () => {
+    const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "daily-check-ins");
+    if (ch) await ch.send(`⏰ Time for your check-in! Log your progress and stay accountable!`);
   }, { timezone: "America/New_York" });
 });
+
+// Daily wealth tip 11AM
+cron.schedule("0 11 * * *", async () => {
+  const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "wealth");
+  if (!ch) return;
+  const tip = await getOpenAIResponse("Provide a practical daily wealth tip for investing, business, money management, stocks, crypto, life insurance, entrepreneurship, leveraging debt, LLCs, banking, and financial growth.");
+  await ch.send({ content: `💰 Daily Wealth Tip:\n${tip}` });
+}, { timezone: "America/New_York" });
+
+// Daily health news 10AM
+cron.schedule("0 10 * * *", async () => {
+  const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "health");
+  if (!ch) return;
+  const news = await getHealthNews();
+  await ch.send({ content: `🩺 Daily Health News:\n${news}` });
+}, { timezone: "America/New_York" });
+
+// Sports updates 8am, 12pm, 4pm
+const fightTimes = ["0 8 * * *", "0 12 * * *", "0 16 * * *"];
+fightTimes.forEach(t => {
+  cron.schedule(t, async () => {
+    const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "sports");
+    if (!ch) return;
+    const u = await getSportsUpdates();
+    await ch.send({ content: `🥊 Combat & Sports Update:\n${u}` });
+  }, { timezone: "America/New_York" });
+});
+
+// Fitness videos 12PM
+cron.schedule("0 12 * * *", async () => {
+  const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "fitness");
+  if (!ch) return;
+  const videos = await getRandomFitnessVideos(Math.floor(Math.random() * 2) + 2);
+  for (const v of videos) await ch.send(v);
+}, { timezone: "America/New_York" });
+
+// Birthday announcer 8AM
+cron.schedule("0 8 * * *", async () => {
+  const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "general");
+  if (!ch) return;
+  const today = new Date();
+  const mmdd = `${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+  for (const [uid, date] of Object.entries(birthdays)) {
+    const birthMd = date.slice(5);
+    if (birthMd === mmdd) {
+      await ch.send(`🎉 Today is <@${uid}>'s birthday! Go shout them a happy birthday! 🎂`);
+    }
+  }
+}, { timezone: "America/New_York" });
+
+// Weekly leaderboard Sunday midnight ET
+cron.schedule("0 0 * * 0", async () => {
+  const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "leaderboard");
+  if (!ch) return;
+  const sorted = Object.entries(fitnessWeekly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
+
+  let msg = `🏅 WEEKLY FITNESS TEST DUMP 🏅\n`;
+  if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
+  msg += `\n💥 Weekly Top 5 (TEST):\n`;
+
+  const medals = ["🥇", "🥈", "🥉", "🏅", "💪"];
+
+  sorted.slice(0, 5).forEach(([uid, data], idx) => {
+    msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
+  });
+
+  await ch.send({ content: msg });
+
+  // Reset weekly
+  for (const uid in fitnessWeekly) fitnessWeekly[uid] = { yes: 0, no: 0 };
+  saveWeekly();
+}, { timezone: "America/New_York" });
+
+
+// Monthly leaderboard 1st midnight ET
+cron.schedule("0 0 1 * *", async () => {
+  const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "leaderboard");
+  if (!ch) return;
+  const sorted = Object.entries(fitnessMonthly).sort((a,b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
+
+  let msg = `🏆 Monthly Fitness Winner 🏆\n`;
+  if (sorted.length) msg += `   <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
+  msg += `\n🔥 Monthly Top 5:\n`;
+
+  sorted.slice(0,5).forEach(([uid, data], idx) => {
+    const medals = ["🥇","🥈","🥉","🏅","🏅"];
+    msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
+  });
+
+  await ch.send({ content: msg });
+
+  // Reset monthly
+  for (const uid in fitnessMonthly) fitnessMonthly[uid] = { yes: 0, no: 0 };
+  saveMonthly();
+}, { timezone: "America/New_York" });
+
 
 // ------------------ Message Event Handler ------------------
 client.on("messageCreate", async (message) => {
@@ -905,19 +889,18 @@ client.on("messageCreate", async (message) => {
     if (!date || !/^\d{2}-\d{2}$/.test(date)) return message.reply("Please provide your birthday in MM-DD format, e.g., `setbirthday 09-23`");
     birthdays[authorId] = `${new Date().getFullYear()}-${date}`;
     saveBirthdays();
-    return message.reply(`Got it! Your birthday has been saved as ${date}. 🎉`);
+    return message.reply(`Got it! Your birthday has been saved as ${date}.   `);
   }
 
   if (message.content === "!birthdays") {
-    if (channelName !== "general") return message.reply("You can only run `!birthdays` in the #general channel.");
-    const entries = Object.entries(birthdays);
-    if (!entries.length) return message.channel.send("No birthdays stored yet.");
-    let out = "**Saved Birthdays:**
-";
-    entries.forEach(([uid, d]) => out += `<@${uid}> → ${d}
-`);
-    return message.channel.send({ content: out });
-  }
+  if (channelName !== "general") return message.reply("You can only run `!birthdays` in the #general channel.");
+  const entries = Object.entries(birthdays);
+  if (!entries.length) return message.channel.send("No birthdays stored yet.");
+  let out = "**Saved Birthdays:**\n";
+  entries.forEach(([uid, d]) => out += `<@${uid}> → ${d}\n`);
+  return message.channel.send({ content: out });
+}
+
 
   // Enhanced Daily check-ins tracking
   if (channelName === "daily-check-ins") {
@@ -936,7 +919,7 @@ client.on("messageCreate", async (message) => {
         fitnessWeekly[authorId].yes += 1;
         fitnessMonthly[authorId].yes += 1;
         const encouragements = ['Beast mode!', 'Keep crushing it!', 'Unstoppable!', 'Champion mindset!'];
-        message.react('💪');
+        message.react('  ');
         setTimeout(() => message.reply(encouragements[Math.floor(Math.random() * encouragements.length)]), 1000);
       } else if (hasNegative && !hasPositive) {
         fitnessWeekly[authorId].no += 1;
@@ -977,17 +960,17 @@ client.on("messageCreate", async (message) => {
     if (!leaderboardChannel) return message.reply("No #leaderboard channel found.");
 
     const sorted = Object.entries(fitnessWeekly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
-    let msg = "**🏅 WEEKLY FITNESS TEST DUMP 🏅**
-";
-    if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}
-`;
-    msg += "
-💥 Weekly Top 5 (TEST):
-";
+    let msg = `🏅 WEEKLY FITNESS TEST DUMP 🏅\n`;
+// ...
+msg += `\n💥 Weekly Top 5 (TEST):\n`;
 
-    const medals = ["🥇", "🥈", "🥉", "🏋️", "💪"];
+    if (sorted.length) msg += `   <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}
+`;
+    msg += \\n💥 Weekly Top 5 (TEST):\n`;`
+
+    const medals = ["  ", "  ", "  ", "  ️", "  "];
     sorted.slice(0, 5).forEach(([uid, data], idx) => {
-      msg += `${medals[idx] || "🏅"} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}
+      msg += `${medals[idx] || "  "} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}
 `;
     });
 
@@ -1119,7 +1102,7 @@ if (message.content === "!progress") {
     const weekly = fitnessWeekly[authorId] || { yes: 0, no: 0 };
     const monthly = fitnessMonthly[authorId] || { yes: 0, no: 0 };
     const streak = weekly.yes - weekly.no;
-    const reply = `📊 **Your Progress**
+    const reply = `   **Your Progress**
 Weekly → ✅ ${weekly.yes} | ❌ ${weekly.no}
 Monthly → ✅ ${monthly.yes} | ❌ ${monthly.no}
 Streak (weekly yes - no): ${streak}
@@ -1186,39 +1169,39 @@ if (message.content === "!habits") {
 // !workoutplan
 if (message.content.startsWith("!workoutplan ")) {
   const type = message.content.split(" ")[1]?.toLowerCase();
-  const plans = {
-    push: "**Push Day:**
+    const plans = {
+    push: `**Push Day:**
 • Push-ups: 3x12
 • Pike Push-ups: 3x8
 • Tricep Dips: 3x10
 • Plank: 3x30s
-• Diamond Push-ups: 2x8",
-    pull: "**Pull Day:**
+• Diamond Push-ups: 2x8`,
+    pull: `**Pull Day:**
 • Pull-ups: 3x5-8
 • Inverted Rows: 3x10
 • Face Pulls: 3x12
 • Dead Hang: 3x20s
-• Bicep Curls: 3x12",
-    legs: "**Leg Day:**
+• Bicep Curls: 3x12`,
+    legs: `**Leg Day:**
 • Squats: 3x15
 • Lunges: 3x10 each leg
 • Calf Raises: 3x15
 • Wall Sit: 3x30s
-• Bulgarian Split Squats: 2x8 each",
-    cardio: "**Cardio:**
+• Bulgarian Split Squats: 2x8 each`,
+    cardio: `**Cardio:**
 • 20min run/walk
 • Burpees: 3x5
 • Jumping Jacks: 3x20
 • High Knees: 3x30s
-• Mountain Climbers: 3x15",
-    core: "**Core:**
+• Mountain Climbers: 3x15`,
+    core: `**Core:**
 • Plank: 3x45s
 • Crunches: 3x20
 • Russian Twists: 3x15
 • Leg Raises: 3x12
-• Dead Bug: 2x10 each"
+• Dead Bug: 2x10 each`
   };
-  
+
   if (plans[type]) {
     return message.reply(`${plans[type]}
 
@@ -1235,7 +1218,7 @@ if (message.content === "!resetprogress") {
     fitnessMonthly[authorId] = { yes: 0, no: 0 };
     saveWeekly();
     saveMonthly();
-    return message.reply("Your weekly and monthly progress has been reset. Fresh start 💪");
+    return message.reply("Your weekly and monthly progress has been reset. Fresh start   ");
   } catch (e) {
     console.error("!resetprogress error:", e);
     return message.reply("Couldn't reset your progress right now.");
@@ -1258,7 +1241,7 @@ if (message.content === "!quote") {
   ];
   
   const quote = quotes[Math.floor(Math.random() * quotes.length)];
-  return message.reply(`💡 ${quote}`);
+  return message.reply(`   ${quote}`);
 }
 
 // !stats command
@@ -1271,51 +1254,52 @@ if (message.content === "!stats") {
   const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
   const position = sorted.findIndex(([uid]) => uid === authorId) + 1;
 
-  let msg = `📊 **${message.author.username}'s Stats**
-
-`;
-  msg += `**Fitness:**
-`;
-  msg += `• This week: ✅${weekly.yes} ❌${weekly.no}
-`;
-  msg += `• This month: ✅${monthly.yes} ❌${monthly.no}
-`;
-  msg += `• Success rate: ${monthly.yes + monthly.no > 0 ? Math.round((monthly.yes / (monthly.yes + monthly.no)) * 100) : 0}%
-`;
-  msg += `• Leaderboard position: ${position > 0 ? `#${position}` : 'Unranked'}
-
+  let msg = `   **${message.author.username}'s Stats** 
 `;
 
-  if (Object.keys(habits).length > 0) {
-    msg += `**Habits:**
+msg += `**Fitness:**
 `;
-    Object.entries(habits).forEach(([habit, data]) => {
-      const today = new Date().toDateString();
-      const checkedToday = data.lastChecked === today ? " ✅" : "";
-      msg += `• ${habit}: ${data.streak}🔥 (${data.total} total)${checkedToday}
+msg += `• This week: ✅${weekly.yes} ❌${weekly.no}
 `;
-    });
-  } else {
-    msg += `**Habits:** None tracked yet. Use \`!addhabit [habit]\` to start!
+msg += `• This month: ✅${monthly.yes} ❌${monthly.no}
 `;
-  }
+msg += `• Success rate: ${monthly.yes + monthly.no > 0 ? Math.round((monthly.yes / (monthly.yes + monthly.no)) * 100) : 0}%
+`;
+msg += `• Leaderboard position: ${position > 0 ? `#${position}` : 'Unranked'}
 
-  // Show active challenges
-  const userChallenges = Object.entries(challenges).filter(([id, chal]) =>
-    chal.participants.includes(authorId) && chal.guildId === guild?.id
-  );
-  if (userChallenges.length > 0) {
-    msg += `
+`;
+
+if (Object.keys(habits).length > 0) {
+  msg += `**Habits:**
+`;
+  Object.entries(habits).forEach(([habit, data]) => {
+    const today = new Date().toDateString();
+    const checkedToday = data.lastChecked === today ? " ✅" : "";
+    msg += `• ${habit}: ${data.streak}   (${data.total} total)${checkedToday}
+`;
+  });
+} else {
+  msg += `**Habits:** None tracked yet. Use \`!addhabit [habit]\` to start!
+`;
+}
+
+// Show active challenges
+const userChallenges = Object.entries(challenges).filter(([id, chal]) =>
+  chal.participants.includes(authorId) && chal.guildId === guild?.id
+);
+
+if (userChallenges.length > 0) {
+  msg += `
 **Active Challenges:** ${userChallenges.length}
 `;
-    userChallenges.slice(0, 3).forEach(([id, chal]) => {
-      msg += `• ${chal.name}
+  userChallenges.slice(0, 3).forEach(([id, chal]) => {
+    msg += `• ${chal.name}
 `;
-    });
-  }
-
-  return message.reply(msg);
+  });
 }
+
+return message.reply(msg);
+
 
 // Separate challenge commands:
 
@@ -1340,13 +1324,13 @@ if (message.content.startsWith("!challenge create ")) {
   saveChallenges();
 
   const embed = new EmbedBuilder()
-    .setTitle("🏆 NEW CHALLENGE CREATED!")
+    .setTitle("   NEW CHALLENGE CREATED!")
     .setDescription(challengeText)
     .setColor(0x00AE86)
-    .setFooter({ text: `React with 💪 to join! ID: ${challengeId}` });
+    .setFooter({ text: `React with    to join! ID: ${challengeId}` });
 
   const msg = await message.channel.send({ embeds: [embed] });
-  await msg.react('💪');
+  await msg.react('  ');
   return;
 }
 
@@ -1363,7 +1347,7 @@ if (message.content.startsWith("!challenge join ")) {
   return message.reply(`You've joined the challenge: "${challenge.name}"! Good luck!`);
 }
 
-// !challenges
+// !challenges 
 if (message.content === "!challenges") {
   const guildChallenges = Object.entries(challenges).filter(([id, chal]) =>
     chal.guildId === message.guild?.id
@@ -1371,31 +1355,16 @@ if (message.content === "!challenges") {
 
   if (!guildChallenges.length) return message.reply("No active challenges.");
 
-  let msg = "🏆 **Active Challenges:**
-";
+  let msg = `🏆 Active Challenges:\n`;
   guildChallenges.forEach(([id, chal]) => {
-    msg += `• **${chal.name}** (${chal.participants.length} participants) - ID: ${id}
-`;
+    msg += `• **${chal.name}** (${chal.participants.length} participants) - ID: ${id}\n`;
   });
-  msg += "
-Use `!challenge join [ID]` to join a challenge!";
+  msg += `\nUse \`!challenge join [ID]\` to join a challenge!`;
+
   return message.reply(msg);
 }
 
-// !setgoal command
-if (message.content.startsWith("!setgoal ")) {
-  const goal = parseInt(message.content.split(" ")[1]);
-  if (!goal || goal < 1 || goal > 21) {
-    return message.reply("Set a weekly workout goal between 1-21: `!setgoal 5`");
-  }
 
-  if (!memory.goals) memory.goals = {};
-  memory.goals[authorId] = goal;
-  saveMemory();
-
-  const current = fitnessWeekly[authorId]?.yes || 0;
-  return message.reply(`🎯 Weekly goal set to ${goal} workouts! Current progress: ${current}/${goal}`);
-}
 
 // !goal command
 if (message.content === "!goal") {
@@ -1408,14 +1377,14 @@ if (message.content === "!goal") {
   const remaining = 10 - completed;
   const bar = "█".repeat(completed) + "░".repeat(remaining);
 
-  let statusEmoji = "🎯";
+  let statusEmoji = "  ";
   let message_text = "";
 
   if (percent >= 100) {
-    statusEmoji = "🏆";
-    message_text = " - GOAL CRUSHED! 🔥";
+    statusEmoji = "  ";
+    message_text = " - GOAL CRUSHED!   ";
   } else if (percent >= 80) {
-    statusEmoji = "💪";
+    statusEmoji = "  ";
     message_text = " - Almost there!";
   } else if (percent >= 50) {
     statusEmoji = "⚡";
@@ -1718,7 +1687,7 @@ client.on("interactionCreate", async (interaction) => {
       const monthly = fitnessMonthly[uid] || { yes: 0, no: 0 };
       const streak = weekly.yes - weekly.no;
       await interaction.reply({
-        content: `📊 **Your Progress**
+        content: `   **Your Progress**
 Weekly → ✅ ${weekly.yes} | ❌ ${weekly.no}
 Monthly → ✅ ${monthly.yes} | ❌ ${monthly.no}
 Streak (weekly yes - no): ${streak}`,
@@ -1897,9 +1866,9 @@ client.on("messageReactionAdd", async (reaction, user) => {
   }
 
   // Handle challenge join reactions
-  if (reaction.emoji.name === '💪') {
+  if (reaction.emoji.name === '  ') {
     const message = reaction.message;
-    if (message.embeds.length > 0 && message.embeds[0].title === "🏆 NEW CHALLENGE CREATED!") {
+    if (message.embeds.length > 0 && message.embeds[0].title === "   NEW CHALLENGE CREATED!") {
       const footer = message.embeds[0].footer?.text;
       if (footer) {
         const challengeId = footer.split("ID: ")[1];
@@ -1942,14 +1911,15 @@ client.on("guildCreate", async (guild) => {
         .setTitle("GymBotBro is here to help you crush your fitness goals!")
         .setDescription("Thanks for adding me to your server! I'm here to help track workouts, provide accountability, and motivate your fitness journey.")
         .addFields(
-          { name: "Getting Started", value: "• Create a `#daily-check-ins` channel for workout tracking
-• Create a `#leaderboard` channel for fitness stats
-• Use `/partner queue` to find accountability partners" },
-          { name: "Key Commands", value: "• `!progress` - See your fitness stats
-• `!coach` - Get motivational advice
-• `!addhabit` - Track daily habits
-• `!workoutplan` - Get workout routines" }
+          { name: "Getting Started", value: `• Create a \`#daily-check-ins\` channel for workout tracking
+• Create a \`#leaderboard\` channel for fitness stats
+• Use \`/partner queue\` to find accountability partners` },
+          { name: "Key Commands", value: `• \`!progress\` - See your fitness stats
+• \`!coach\` - Get motivational advice
+• \`!addhabit\` - Track daily habits
+• \`!workoutplan\` - Get workout routines` }
         )
+
         .setColor(0x00AE86)
         .setTimestamp();
       
