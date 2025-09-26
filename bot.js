@@ -302,7 +302,8 @@ async function getSportsUpdates() {
 
 // ------------------ Leaderboard utilities ------------------
 function buildLeaderboardMessage() {
-  let leaderboardMsg = "**🏆 Fitness Leaderboard (Daily Snapshot) 🏆**
+  let leaderboardMsg = "**🏆 Fitness Leaderboard (Daily Snapshot) 🏆**\n\n";
+
 
 ";
   const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
