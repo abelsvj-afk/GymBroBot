@@ -80,7 +80,12 @@ function loadData() {
     if (fs.existsSync(PARTNERS_FILE)) partners = JSON.parse(fs.readFileSync(PARTNERS_FILE, 'utf8'));
     if (fs.existsSync(STRIKES_FILE)) strikes = JSON.parse(fs.readFileSync(STRIKES_FILE, 'utf8'));
     if (fs.existsSync(HABITS_FILE)) habitTracker = JSON.parse(fs.readFileSync(HABITS_FILE, 'utf8'));
-    loadChallenges(); // Add this line
+    loadChallenges();
+    console.log("Data loaded successfully");
+  } catch (e) {
+    console.error("Error loading data:", e);
+  }
+}
 
 function loadChallenges() {
   try {
@@ -96,9 +101,7 @@ function saveChallenges() {
   } catch (e) {
     console.error("Save challenges error:", e);
   }
-}
-
-    console.log("Data loaded successfully");
+}    console.log("Data loaded successfully");
   } catch (e) {
     console.error("Error loading data:", e);
   }
@@ -176,7 +179,7 @@ async function checkRoleRewards(userId, guild) {
           continue;
         }
       }
-loadData(); // Add this line
+ // Add this line
       
       if (!member.roles.cache.has(role.id)) {
         try {
@@ -193,7 +196,8 @@ loadData(); // Add this line
   }
 }
 
-// Load data immediately after function definitions
+// Load data after all functions are defined
+loadData();
 
 // ------------------ Discord Client Setup ------------------
 const client = new Client({
@@ -885,36 +889,47 @@ client.on("messageCreate", async (message) => {
 
   // Enhanced Daily check-ins tracking
 if (channelName === "daily-check-ins") {
-  if (!fitnessWeekly[authorId]) fitnessWeekly[authorId] = { yes: 0, no: 0 };
-  if (!fitnessMonthly[authorId]) fitnessMonthly[authorId] = { yes: 0, no: 0 };
+  try {
+    if (!fitnessWeekly[authorId]) fitnessWeekly[authorId] = { yes: 0, no: 0 };
+    if (!fitnessMonthly[authorId]) fitnessMonthly[authorId] = { yes: 0, no: 0 };
 
-  const content = message.content.toLowerCase();
-  const positiveWords = ['workout', 'gym', 'ran', 'lifted', 'exercise', 'trained', 'done', 'completed', 'finished', 'yes', '✅', 'crushed', 'smashed', 'cardio', 'weights', 'pushups', 'pullups', 'squats'];
-  const negativeWords = ['rest day', 'skipped', 'missed', 'no workout', 'didn\'t', 'failed', 'no', '❌', 'sick', 'injured'];
-  
-  const hasPositive = positiveWords.some(word => content.includes(word));
-  const hasNegative = negativeWords.some(word => content.includes(word));
-  
-  if (hasPositive && !hasNegative) {
-    fitnessWeekly[authorId].yes += 1;
-    fitnessMonthly[authorId].yes += 1;
-    const encouragements = ['Beast mode!', 'Keep crushing it!', 'Unstoppable!', 'Champion mindset!'];
-    message.react('💪');
-    setTimeout(() => message.reply(encouragements[Math.floor(Math.random() * encouragements.length)]), 1000);
-  } else if (hasNegative && !hasPositive) {
-    fitnessWeekly[authorId].no += 1;
-    fitnessMonthly[authorId].no += 1;
-    message.react('❌');
-    setTimeout(() => message.reply('Tomorrow is a new day to dominate!'), 1000);
-  } else {
-    return; // Ignore ambiguous messages
+    const content = message.content.toLowerCase();
+    const positiveWords = ['workout', 'gym', 'ran', 'lifted', 'exercise', 'trained', 'done', 'completed', 'finished', 'yes', '✅', 'crushed', 'smashed', 'cardio', 'weights', 'pushups', 'pullups', 'squats'];
+    const negativeWords = ['rest day', 'skipped', 'missed', 'no workout', 'didn\'t', 'failed', 'no', '❌', 'sick', 'injured'];
+    
+    const hasPositive = positiveWords.some(word => content.includes(word));
+    const hasNegative = negativeWords.some(word => content.includes(word));
+    
+    if (hasPositive && !hasNegative) {
+      fitnessWeekly[authorId].yes += 1;
+      fitnessMonthly[authorId].yes += 1;
+      const encouragements = ['Beast mode!', 'Keep crushing it!', 'Unstoppable!', 'Champion mindset!'];
+      message.react('💪');
+      setTimeout(() => message.reply(encouragements[Math.floor(Math.random() * encouragements.length)]), 1000);
+    } else if (hasNegative && !hasPositive) {
+      fitnessWeekly[authorId].no += 1;
+      fitnessMonthly[authorId].no += 1;
+      message.react('❌');
+      setTimeout(() => message.reply('Tomorrow is a new day to dominate!'), 1000);
+    } else {
+      return; // Ignore ambiguous messages
+    }
+    
+    saveWeekly();
+    saveMonthly();
+    
+    try { 
+      await updateLeaderboardChannel(); 
+      await checkRoleRewards(authorId, guild);
+    } catch (e) { 
+      console.error("updateLeaderboardChannel error:", e); 
+    }
+    return;
+  } catch (e) {
+    console.error("Fitness tracking error:", e);
   }
-  
-  saveWeekly();
-  saveMonthly();
-  try { await updateLeaderboardChannel(); } catch (e) { console.error("updateLeaderboardChannel error:", e); }
-  return;
 }
+
 await checkRoleRewards(authorId, guild);
 
   // !checkin-test (mod-only)
