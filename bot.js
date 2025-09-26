@@ -292,8 +292,8 @@ async function getSportsUpdates() {
       if (resBoxing.data && Object.keys(resBoxing.data).length) results.push("Boxing/MMA: Check official fight calendars for latest events.");
     } catch {}
     if (!results.length) return "No new sports updates available today.";
-    return results.join("
-");
+   return results.join("\n");
+
   } catch (e) {
     console.error("Sports error:", e.message);
     return "No new sports updates available today.";
