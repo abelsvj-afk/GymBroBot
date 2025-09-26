@@ -104,7 +104,7 @@ function saveHabits() {
 
 function loadHabits() {
   try {
-    if (fs.existsExists(habitsFile)) {
+    if (fs.existsSync(habitsFile)) {
       habitTracker = JSON.parse(fs.readFileSync(habitsFile, 'utf8'));
     }
   } catch (e) {
@@ -422,7 +422,7 @@ cron.schedule('0 0 * * 0', async () => {
 });
 
 // Bot ready
-client.once("ready", () => {
+client.once("clientready", () => {
   console.log(`Logged in as ${client.user.tag}!`);
   client.user.setActivity("!help for commands");
   loadData();
