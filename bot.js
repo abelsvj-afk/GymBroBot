@@ -303,20 +303,17 @@ async function getSportsUpdates() {
 // ------------------ Leaderboard utilities ------------------
 function buildLeaderboardMessage() {
   let leaderboardMsg = "**🏆 Fitness Leaderboard (Daily Snapshot) 🏆**\n\n";
-
-
-";
   const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
   if (sorted.length === 0) leaderboardMsg += "No data yet.";
   sorted.forEach(([uid, data], idx) => {
     const medals = ["🥇", "🥈", "🥉"];
     const flair = idx < 3 ? medals[idx] : "💪";
     const weeklyCount = fitnessWeekly[uid] ? fitnessWeekly[uid].yes : 0;
-    leaderboardMsg += `${flair} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no} (Weekly: ✅${weeklyCount})
-`;
+    leaderboardMsg += `${flair} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no} (Weekly: ✅${weeklyCount})\n`;
   });
   return leaderboardMsg;
 }
+
 
 async function updateLeaderboardChannel() {
   const leaderboardChannel = client.channels.cache.find(ch => (ch.name || "").toLowerCase() === "leaderboard");
