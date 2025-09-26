@@ -1155,8 +1155,8 @@ if (message.content === "!habits") {
     return message.reply("No habits tracked yet. Use `!addhabit [habit]` to start!");
   }
   
-  let msg = "**Your Habits:**
-";
+  let msg = `**Your Habits:**
+`;
   Object.entries(habitTracker[authorId]).forEach(([habit, data]) => {
     const today = new Date().toDateString();
     const checkedToday = data.lastChecked === today ? " ✅" : "";
@@ -1165,6 +1165,7 @@ if (message.content === "!habits") {
   });
   return message.reply(msg);
 }
+
 
 // !workoutplan
 if (message.content.startsWith("!workoutplan ")) {
