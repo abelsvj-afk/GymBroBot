@@ -677,19 +677,30 @@ client.once("clientReady", async () => {
   };
 
   for (const [name, message] of Object.entries(howToMessages)) {
-    const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === name);
-    if (!ch) continue;
-    try {
-      const pinned = await ch.messages.fetchPins();
-      if (!pinned.some(m => m.content === message || (m.embeds && m.embeds.some(e => e.description === message)))) {
-        const embed = new EmbedBuilder().setTitle(`Guide — #${name}`).setDescription(message).setColor(0x00AE86);
-        const sent = await ch.send({ embeds: [embed] });
-        try { await sent.pin(); } catch (e) {}
+  const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === name);
+  if (!ch) continue;
+  try {
+    const pinned = await ch.messages.fetchPins();
+    // Fix: Convert Collection to array before using .some()
+    if (!Array.from(pinned.values()).some(m => 
+      m.content === message || 
+      (m.embeds && m.embeds.some(e => e.description === message))
+    )) {
+      const embed = new EmbedBuilder()
+        .setTitle(`Guide — #${name}`)
+        .setDescription(message)
+        .setColor(0x00AE86);
+      const sent = await ch.send({ embeds: [embed] });
+      try { 
+        await sent.pin(); 
+      } catch (e) {
+        console.error(`Failed to pin message in #${name}:`, e.message);
       }
-    } catch (e) {
-      console.error(`Pin guide error for #${name}:`, e);
     }
+  } catch (e) {
+    console.error(`Pin guide error for #${name}:`, e.message);
   }
+}
 
   // ------------------ Cron Jobs Setup ------------------
   
