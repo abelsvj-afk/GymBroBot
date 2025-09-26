@@ -251,7 +251,8 @@ async function getRandomFitnessVideos(count = 2) {
     const items = res.data.items || [];
     if (!items.length) return ["No fitness videos found today."];
     const shuffled = items.sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, count).map(i => `🏋️‍♂️ ${i.snippet.title}\nhttps://www.youtube.com/watch?v=${i.id.videoId}`);
+    return shuffled.slice(0, count).map(i => `🏋️‍♂️ ${i.snippet.title}
+https://www.youtube.com/watch?v=${i.id.videoId}`);
   } catch (e) {
     console.error("YouTube error:", e.message);
     return ["Error fetching videos from YouTube."];
@@ -263,7 +264,9 @@ async function getHealthNews() {
   try {
     const res = await axios.get(`https://newsapi.org/v2/top-headlines?category=health&language=en&apiKey=${process.env.NEWS_API_KEY}`);
     const top = res.data.articles?.[0];
-    return top ? `📰 **${top.title}**\n${top.description || ""}\n${top.url}` : "No health news today.";
+    return top ? `📰 **${top.title}**
+${top.description || ""}
+${top.url}` : "No health news today.";
   } catch (e) {
     console.error("News error:", e.message);
     return "Could not fetch health news.";
@@ -289,7 +292,8 @@ async function getSportsUpdates() {
       if (resBoxing.data && Object.keys(resBoxing.data).length) results.push("Boxing/MMA: Check official fight calendars for latest events.");
     } catch {}
     if (!results.length) return "No new sports updates available today.";
-    return results.join("\n");
+    return results.join("
+");
   } catch (e) {
     console.error("Sports error:", e.message);
     return "No new sports updates available today.";
@@ -298,14 +302,17 @@ async function getSportsUpdates() {
 
 // ------------------ Leaderboard utilities ------------------
 function buildLeaderboardMessage() {
-  let leaderboardMsg = "**🏆 Fitness Leaderboard (Daily Snapshot) 🏆**\n\n";
+  let leaderboardMsg = "**🏆 Fitness Leaderboard (Daily Snapshot) 🏆**
+
+";
   const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
   if (sorted.length === 0) leaderboardMsg += "No data yet.";
   sorted.forEach(([uid, data], idx) => {
     const medals = ["🥇", "🥈", "🥉"];
     const flair = idx < 3 ? medals[idx] : "💪";
     const weeklyCount = fitnessWeekly[uid] ? fitnessWeekly[uid].yes : 0;
-    leaderboardMsg += `${flair} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no} (Weekly: ✅${weeklyCount})\n`;
+    leaderboardMsg += `${flair} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no} (Weekly: ✅${weeklyCount})
+`;
   });
   return leaderboardMsg;
 }
@@ -318,7 +325,7 @@ async function updateLeaderboardChannel() {
     try { await leaderboardChannel.bulkDelete(10); } catch (e) { /* ignore */ }
     await leaderboardChannel.send({ content: msg });
   } catch (e) {
-    console.error("updateLeaderboardChannel error:", e.message);
+    console.error("updateLeaderboardChannel error:", e);
   }
 }
 
@@ -414,7 +421,9 @@ async function createPartnerChannel(guild, userAId, userBId, options = {}) {
 
     const rulesEmbed = new EmbedBuilder()
       .setTitle("Welcome to your Accountability Channel")
-      .setDescription(`Welcome <@${userAId}> and <@${userBId}>!\nThis channel is private between the two of you and moderators. Follow the rules pinned here.\nType \`!endpartner\` to end this pairing when you're done.`)
+      .setDescription(`Welcome <@${userAId}> and <@${userBId}>!
+This channel is private between the two of you and moderators. Follow the rules pinned here.
+Type \`!endpartner\` to end this pairing when you're done.`)
       .addFields(
         { name: "Guidelines", value: "Be kind • Encourage • Respect personal boundaries" },
         { name: "Important", value: "**No contacting each other outside this channel. Violations will be removed and may result in strikes or ban.**" },
@@ -483,7 +492,8 @@ async function applyStrike({ guild, userId, issuerId = null, reason = "Violation
         console.error("Immediate ban failed:", e);
       }
       const embed = new EmbedBuilder().setTitle("Immediate Ban Executed")
-        .setDescription(`<@${userId}> was banned for contacting partner outside private channel.\nReason: ${reason}`)
+        .setDescription(`<@${userId}> was banned for contacting partner outside private channel.
+Reason: ${reason}`)
         .setColor(0xff0000)
         .setTimestamp();
       await notifyLoggingChannel(guild, embed);
@@ -495,9 +505,11 @@ async function applyStrike({ guild, userId, issuerId = null, reason = "Violation
     saveStrikes();
 
     if (sr.count >= STRIKE_CONFIG.warnCount && sr.count < STRIKE_CONFIG.muteCount) {
-      try { (await client.users.fetch(userId)).send(`⚠️ Warning in ${guild.name}: ${reason}\nThis is strike ${sr.count}. Repeated violations will escalate.`); } catch {}
+      try { (await client.users.fetch(userId)).send(`⚠️ Warning in ${guild.name}: ${reason}
+This is strike ${sr.count}. Repeated violations will escalate.`); } catch {}
       const embed = new EmbedBuilder().setTitle("Strike Issued")
-        .setDescription(`<@${userId}> has been issued a warning (strike ${sr.count}).\nReason: ${reason}`)
+        .setDescription(`<@${userId}> has been issued a warning (strike ${sr.count}).
+Reason: ${reason}`)
         .setColor(0xffa500)
         .setTimestamp();
       await notifyLoggingChannel(guild, embed);
@@ -535,7 +547,9 @@ async function applyStrike({ guild, userId, issuerId = null, reason = "Violation
           else { delete partners[chanId]; savePartners(); }
         }
       }
-      await notifyLoggingChannel(guild, new EmbedBuilder().setTitle("Partner Ended & Blocked")
+      await notifyLoggingChannel(
+        guild,
+        new EmbedBuilder().setTitle("Partner Ended & Blocked")
         .setDescription(`<@${userId}> had partner channels ended and is blocked from future matching (strike ${sr.count}).`)
         .setColor(0xff4500)
         .setTimestamp());
@@ -578,6 +592,19 @@ cron.schedule("*/5 * * * *", async () => {
   }
 }, { timezone: "America/New_York" });
 
+// ------------------ Slash Commands ------------------
+const SLASH_COMMANDS = [
+  {
+    name: "strike",
+    description: "Manage strikes",
+    type: 1,
+    options: [
+      {
+        name: "add",
+        description: "Add a strike to a user",
+        type: 1,
+        options: [
+          { name: "user", description: "The user to strike", type: 6, required: true },
 // ------------------ Slash Commands ------------------
 const SLASH_COMMANDS = [
   {
@@ -714,7 +741,8 @@ client.once("ready", async () => {
     const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "wealth");
     if (!ch) return;
     const tip = await getOpenAIResponse("Provide a practical daily wealth tip for investing, business, money management, stocks, crypto, life insurance, entrepreneurship, leveraging debt, LLCs, banking, and financial growth.");
-    await ch.send({ content: `💰 Daily Wealth Tip:\n${tip}` });
+    await ch.send({ content: `💰 Daily Wealth Tip:
+${tip}` });
   }, { timezone: "America/New_York" });
 
   // Daily health news 10AM
@@ -722,7 +750,8 @@ client.once("ready", async () => {
     const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "health");
     if (!ch) return;
     const news = await getHealthNews();
-    await ch.send({ content: `🏥 Daily Health News:\n${news}` });
+    await ch.send({ content: `🏥 Daily Health News:
+${news}` });
   }, { timezone: "America/New_York" });
 
   // Sports updates 8am, 12pm, 4pm
@@ -732,7 +761,8 @@ client.once("ready", async () => {
       const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "sports");
       if (!ch) return;
       const u = await getSportsUpdates();
-      await ch.send({ content: `🥊 Combat & Sports Update:\n${u}` });
+      await ch.send({ content: `🥊 Combat & Sports Update:
+${u}` });
     }, { timezone: "America/New_York" });
   });
 
@@ -763,12 +793,17 @@ client.once("ready", async () => {
     const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "leaderboard");
     if (!ch) return;
     const sorted = Object.entries(fitnessWeekly).sort((a,b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
-    let msg = "**🏅 Weekly Fitness Winner 🏅**\n";
-    if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
-    msg += "\n💥 Weekly Top 5:\n";
+    let msg = "**🏅 Weekly Fitness Winner 🏅**
+";
+    if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}
+`;
+    msg += "
+💥 Weekly Top 5:
+";
     sorted.slice(0,5).forEach(([uid, data], idx) => {
       const medals = ["🥇","🥈","🥉","🏋️","💪"];
-      msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
+      msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}
+`;
     });
     await ch.send({ content: msg });
     // Reset weekly
@@ -781,12 +816,17 @@ client.once("ready", async () => {
     const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "leaderboard");
     if (!ch) return;
     const sorted = Object.entries(fitnessMonthly).sort((a,b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
-    let msg = "**🏆 Monthly Fitness Winner 🏆**\n";
-    if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
-    msg += "\n🔥 Monthly Top 5:\n";
+    let msg = "**🏆 Monthly Fitness Winner 🏆**
+";
+    if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}
+`;
+    msg += "
+🔥 Monthly Top 5:
+";
     sorted.slice(0,5).forEach(([uid, data], idx) => {
       const medals = ["🥇","🥈","🥉","🏆","💪"];
-      msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
+      msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}
+`;
     });
     await ch.send({ content: msg });
     // Reset monthly
@@ -874,8 +914,10 @@ client.on("messageCreate", async (message) => {
     if (channelName !== "general") return message.reply("You can only run `!birthdays` in the #general channel.");
     const entries = Object.entries(birthdays);
     if (!entries.length) return message.channel.send("No birthdays stored yet.");
-    let out = "**Saved Birthdays:**\n";
-    entries.forEach(([uid, d]) => out += `<@${uid}> → ${d}\n`);
+    let out = "**Saved Birthdays:**
+";
+    entries.forEach(([uid, d]) => out += `<@${uid}> → ${d}
+`);
     return message.channel.send({ content: out });
   }
 
@@ -937,13 +979,18 @@ client.on("messageCreate", async (message) => {
     if (!leaderboardChannel) return message.reply("No #leaderboard channel found.");
 
     const sorted = Object.entries(fitnessWeekly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
-    let msg = "**🏅 WEEKLY FITNESS TEST DUMP 🏅**\n";
-    if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
-    msg += "\n💥 Weekly Top 5 (TEST):\n";
+    let msg = "**🏅 WEEKLY FITNESS TEST DUMP 🏅**
+";
+    if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}
+`;
+    msg += "
+💥 Weekly Top 5 (TEST):
+";
 
     const medals = ["🥇", "🥈", "🥉", "🏋️", "💪"];
     sorted.slice(0, 5).forEach(([uid, data], idx) => {
-      msg += `${medals[idx] || "🏅"} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
+      msg += `${medals[idx] || "🏅"} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}
+`;
     });
 
     try { await leaderboardChannel.send({ content: msg }); } catch (e) { console.error("!checkin-test send error:", e); }
@@ -1051,7 +1098,8 @@ if (partnerQueue.length >= 2 && message.guild) {
       if (ch) {
         const embed = new EmbedBuilder()
           .setTitle("Paired!")
-          .setDescription(`<@${first.id}> and <@${other.id}> have been paired.\nCheck your DMs or go to ${ch.toString()}`)
+          .setDescription(`<@${first.id}> and <@${other.id}> have been paired.
+Check your DMs or go to ${ch.toString()}`)
           .setColor(0x00AE86)
           .setTimestamp();
         try { await (await client.users.fetch(first.id)).send({ embeds: [embed] }); } catch {}
@@ -1073,7 +1121,11 @@ if (message.content === "!progress") {
     const weekly = fitnessWeekly[authorId] || { yes: 0, no: 0 };
     const monthly = fitnessMonthly[authorId] || { yes: 0, no: 0 };
     const streak = weekly.yes - weekly.no;
-    const reply = `📊 **Your Progress**\nWeekly → ✅ ${weekly.yes} | ❌ ${weekly.no}\nMonthly → ✅ ${monthly.yes} | ❌ ${monthly.no}\nStreak (weekly yes - no): ${streak}\nKeep going — consistency builds results!`;
+    const reply = `📊 **Your Progress**
+Weekly → ✅ ${weekly.yes} | ❌ ${weekly.no}
+Monthly → ✅ ${monthly.yes} | ❌ ${monthly.no}
+Streak (weekly yes - no): ${streak}
+Keep going — consistency builds results!`;
     return message.reply(reply);
   } catch (e) {
     console.error("!progress error:", e);
@@ -1122,11 +1174,13 @@ if (message.content === "!habits") {
     return message.reply("No habits tracked yet. Use `!addhabit [habit]` to start!");
   }
   
-  let msg = "**Your Habits:**\n";
+  let msg = "**Your Habits:**
+";
   Object.entries(habitTracker[authorId]).forEach(([habit, data]) => {
     const today = new Date().toDateString();
     const checkedToday = data.lastChecked === today ? " ✅" : "";
-    msg += `• ${habit}: ${data.streak} day streak (${data.total} total)${checkedToday}\n`;
+    msg += `• ${habit}: ${data.streak} day streak (${data.total} total)${checkedToday}
+`;
   });
   return message.reply(msg);
 }
@@ -1135,15 +1189,42 @@ if (message.content === "!habits") {
 if (message.content.startsWith("!workoutplan ")) {
   const type = message.content.split(" ")[1]?.toLowerCase();
   const plans = {
-    push: "**Push Day:**\n• Push-ups: 3x12\n• Pike Push-ups: 3x8\n• Tricep Dips: 3x10\n• Plank: 3x30s\n• Diamond Push-ups: 2x8",
-    pull: "**Pull Day:**\n• Pull-ups: 3x5-8\n• Inverted Rows: 3x10\n• Face Pulls: 3x12\n• Dead Hang: 3x20s\n• Bicep Curls: 3x12",
-    legs: "**Leg Day:**\n• Squats: 3x15\n• Lunges: 3x10 each leg\n• Calf Raises: 3x15\n• Wall Sit: 3x30s\n• Bulgarian Split Squats: 2x8 each",
-    cardio: "**Cardio:**\n• 20min run/walk\n• Burpees: 3x5\n• Jumping Jacks: 3x20\n• High Knees: 3x30s\n• Mountain Climbers: 3x15",
-    core: "**Core:**\n• Plank: 3x45s\n• Crunches: 3x20\n• Russian Twists: 3x15\n• Leg Raises: 3x12\n• Dead Bug: 2x10 each"
+    push: "**Push Day:**
+• Push-ups: 3x12
+• Pike Push-ups: 3x8
+• Tricep Dips: 3x10
+• Plank: 3x30s
+• Diamond Push-ups: 2x8",
+    pull: "**Pull Day:**
+• Pull-ups: 3x5-8
+• Inverted Rows: 3x10
+• Face Pulls: 3x12
+• Dead Hang: 3x20s
+• Bicep Curls: 3x12",
+    legs: "**Leg Day:**
+• Squats: 3x15
+• Lunges: 3x10 each leg
+• Calf Raises: 3x15
+• Wall Sit: 3x30s
+• Bulgarian Split Squats: 2x8 each",
+    cardio: "**Cardio:**
+• 20min run/walk
+• Burpees: 3x5
+• Jumping Jacks: 3x20
+• High Knees: 3x30s
+• Mountain Climbers: 3x15",
+    core: "**Core:**
+• Plank: 3x45s
+• Crunches: 3x20
+• Russian Twists: 3x15
+• Leg Raises: 3x12
+• Dead Bug: 2x10 each"
   };
   
   if (plans[type]) {
-    return message.reply(`${plans[type]}\n\n*Adjust reps based on your level. Rest 60-90s between sets.*`);
+    return message.reply(`${plans[type]}
+
+*Adjust reps based on your level. Rest 60-90s between sets.*`);
   } else {
     return message.reply("Available plans: `!workoutplan push/pull/legs/cardio/core`");
   }
@@ -1192,22 +1273,33 @@ if (message.content === "!stats") {
   const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
   const position = sorted.findIndex(([uid]) => uid === authorId) + 1;
 
-  let msg = `📊 **${message.author.username}'s Stats**\n\n`;
-  msg += `**Fitness:**\n`;
-  msg += `• This week: ✅${weekly.yes} ❌${weekly.no}\n`;
-  msg += `• This month: ✅${monthly.yes} ❌${monthly.no}\n`;
-  msg += `• Success rate: ${monthly.yes + monthly.no > 0 ? Math.round((monthly.yes / (monthly.yes + monthly.no)) * 100) : 0}%\n`;
-  msg += `• Leaderboard position: ${position > 0 ? `#${position}` : 'Unranked'}\n\n`;
+  let msg = `📊 **${message.author.username}'s Stats**
+
+`;
+  msg += `**Fitness:**
+`;
+  msg += `• This week: ✅${weekly.yes} ❌${weekly.no}
+`;
+  msg += `• This month: ✅${monthly.yes} ❌${monthly.no}
+`;
+  msg += `• Success rate: ${monthly.yes + monthly.no > 0 ? Math.round((monthly.yes / (monthly.yes + monthly.no)) * 100) : 0}%
+`;
+  msg += `• Leaderboard position: ${position > 0 ? `#${position}` : 'Unranked'}
+
+`;
 
   if (Object.keys(habits).length > 0) {
-    msg += `**Habits:**\n`;
+    msg += `**Habits:**
+`;
     Object.entries(habits).forEach(([habit, data]) => {
       const today = new Date().toDateString();
       const checkedToday = data.lastChecked === today ? " ✅" : "";
-      msg += `• ${habit}: ${data.streak}🔥 (${data.total} total)${checkedToday}\n`;
+      msg += `• ${habit}: ${data.streak}🔥 (${data.total} total)${checkedToday}
+`;
     });
   } else {
-    msg += `**Habits:** None tracked yet. Use \`!addhabit [habit]\` to start!\n`;
+    msg += `**Habits:** None tracked yet. Use \`!addhabit [habit]\` to start!
+`;
   }
 
   // Show active challenges
@@ -1215,9 +1307,12 @@ if (message.content === "!stats") {
     chal.participants.includes(authorId) && chal.guildId === guild?.id
   );
   if (userChallenges.length > 0) {
-    msg += `\n**Active Challenges:** ${userChallenges.length}\n`;
+    msg += `
+**Active Challenges:** ${userChallenges.length}
+`;
     userChallenges.slice(0, 3).forEach(([id, chal]) => {
-      msg += `• ${chal.name}\n`;
+      msg += `• ${chal.name}
+`;
     });
   }
 
@@ -1278,11 +1373,14 @@ if (message.content === "!challenges") {
 
   if (!guildChallenges.length) return message.reply("No active challenges.");
 
-  let msg = "🏆 **Active Challenges:**\n";
+  let msg = "🏆 **Active Challenges:**
+";
   guildChallenges.forEach(([id, chal]) => {
-    msg += `• **${chal.name}** (${chal.participants.length} participants) - ID: ${id}\n`;
+    msg += `• **${chal.name}** (${chal.participants.length} participants) - ID: ${id}
+`;
   });
-  msg += "\nUse `!challenge join [ID]` to join a challenge!";
+  msg += "
+Use `!challenge join [ID]` to join a challenge!";
   return message.reply(msg);
 }
 
@@ -1326,7 +1424,9 @@ if (message.content === "!goal") {
     message_text = " - Keep pushing!";
   }
 
-  return message.reply(`${statusEmoji} **Weekly Goal Progress**\n${current}/${goal} workouts (${percent}%)${message_text}\n[${bar}]`);
+  return message.reply(`${statusEmoji} **Weekly Goal Progress**
+${current}/${goal} workouts (${percent}%)${message_text}
+[${bar}]`);
 }
 
 // !coach command
@@ -1374,7 +1474,11 @@ if (["tips and guide", "wealth", "health", "faith", "fitness"].includes(channelN
         channelTraits = "Provide tactical life hacks and practical advice for everyday challenges.";
         break;
        const context = userMemory.previousMessages.length ? `Consider previous messages: ${userMemory.previousMessages.join(" | ")}` : "";
-    return `${basePersona}\n${channelTraits}\n${context}\nUser message: "${userMemory.lastMessage}"\nRespond concisely, authoritatively, and motivatingly.`;
+    return `${basePersona}
+${channelTraits}
+${context}
+User message: "${userMemory.lastMessage}"
+Respond concisely, authoritatively, and motivatingly.`;
   };
   try {
     const res = await getOpenAIResponse(personaPrompt());
@@ -1428,10 +1532,13 @@ if (guild) {
       const rec =
         strikes[guild.id]?.[mention.id] ?? { count: 0, history: [] };
 
-      let out = `⚖️ Strikes for <@${mention.id}>: ${rec.count}\nRecent history:\n`;
+      let out = `⚖️ Strikes for <@${mention.id}>: ${rec.count}
+Recent history:
+`;
       rec.history.slice(-10).forEach(
         (h) =>
-          (out += `- ${h.time}: ${h.reason} (by ${h.issuer ? `<@${h.issuer}>` : "system"})\n`)
+          (out += `- ${h.time}: ${h.reason} (by ${h.issuer ? `<@${h.issuer}>` : "system"})
+`)
       );
 
       return await message.reply(out);
@@ -1571,7 +1678,8 @@ if (guild) {
         habitTracker: Object.keys(habitTracker).length,
         challenges: Object.keys(challenges).length
       };
-      return message.reply(`Data status:\n${JSON.stringify(dataStatus, null, 2)}`);
+      return message.reply(`Data status:
+${JSON.stringify(dataStatus, null, 2)}`);
     } catch (e) {
       console.error("!testdata error:", e);
       return message.reply("Error checking data status.");
@@ -1611,7 +1719,10 @@ client.on("interactionCreate", async (interaction) => {
       const monthly = fitnessMonthly[uid] || { yes: 0, no: 0 };
       const streak = weekly.yes - weekly.no;
       await interaction.reply({
-        content: `📊 **Your Progress**\nWeekly → ✅ ${weekly.yes} | ❌ ${weekly.no}\nMonthly → ✅ ${monthly.yes} | ❌ ${monthly.no}\nStreak (weekly yes - no): ${streak}`,
+        content: `📊 **Your Progress**
+Weekly → ✅ ${weekly.yes} | ❌ ${weekly.no}
+Monthly → ✅ ${monthly.yes} | ❌ ${monthly.no}
+Streak (weekly yes - no): ${streak}`,
         ephemeral: true
       });
       return;
@@ -1717,8 +1828,11 @@ Do not lecture. Be direct, positive, and human. Use occasional emojis but not mo
 
       if (subcmd === "check") {
         const rec = strikes[guild.id] && strikes[guild.id][u.id] ? strikes[guild.id][u.id] : { count: 0, history: [] };
-        let out = `⚖️ Strikes for <@${u.id}>: ${rec.count}\nRecent:\n`;
-        rec.history.slice(-10).forEach(h => out += `- ${h.time}: ${h.reason} (by ${h.issuer ? `<@${h.issuer}>` : "system"})\n`);
+        let out = `⚖️ Strikes for <@${u.id}>: ${rec.count}
+Recent:
+`;
+        rec.history.slice(-10).forEach(h => out += `- ${h.time}: ${h.reason} (by ${h.issuer ? `<@${h.issuer}>` : "system"})
+`);
         return interaction.reply({ content: out, ephemeral: false });
       }
 
@@ -1829,8 +1943,13 @@ client.on("guildCreate", async (guild) => {
         .setTitle("GymBotBro is here to help you crush your fitness goals!")
         .setDescription("Thanks for adding me to your server! I'm here to help track workouts, provide accountability, and motivate your fitness journey.")
         .addFields(
-          { name: "Getting Started", value: "• Create a `#daily-check-ins` channel for workout tracking\n• Create a `#leaderboard` channel for fitness stats\n• Use `/partner queue` to find accountability partners" },
-          { name: "Key Commands", value: "• `!progress` - See your fitness stats\n• `!coach` - Get motivational advice\n• `!addhabit` - Track daily habits\n• `!workoutplan` - Get workout routines" }
+          { name: "Getting Started", value: "• Create a `#daily-check-ins` channel for workout tracking
+• Create a `#leaderboard` channel for fitness stats
+• Use `/partner queue` to find accountability partners" },
+          { name: "Key Commands", value: "• `!progress` - See your fitness stats
+• `!coach` - Get motivational advice
+• `!addhabit` - Track daily habits
+• `!workoutplan` - Get workout routines" }
         )
         .setColor(0x00AE86)
         .setTimestamp();
@@ -1844,4 +1963,4 @@ client.on("guildCreate", async (guild) => {
 
 // ------------------ Bot Login ------------------
 client.login(process.env.DISCORD_TOKEN);
-
+          
