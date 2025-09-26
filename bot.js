@@ -46,6 +46,7 @@ let partnerQueue = [];
 let partners = {};
 let strikes = {};
 let habitTracker = {};
+let challenges = {};
 
 // ------------------ Configuration Constants ------------------
 const DATA_DIR = ".";
@@ -57,6 +58,7 @@ const PARTNER_QUEUE_FILE = path.join(DATA_DIR, "partnerQueue.json");
 const PARTNERS_FILE = path.join(DATA_DIR, "partners.json");
 const STRIKES_FILE = path.join(DATA_DIR, "strikes.json");
 const HABITS_FILE = path.join(DATA_DIR, "habits.json");
+const CHALLENGES_FILE = path.join(DATA_DIR, "challenges.json");
 
 const STRIKE_CONFIG = {
   warnCount: 1,
@@ -78,6 +80,24 @@ function loadData() {
     if (fs.existsSync(PARTNERS_FILE)) partners = JSON.parse(fs.readFileSync(PARTNERS_FILE, 'utf8'));
     if (fs.existsSync(STRIKES_FILE)) strikes = JSON.parse(fs.readFileSync(STRIKES_FILE, 'utf8'));
     if (fs.existsSync(HABITS_FILE)) habitTracker = JSON.parse(fs.readFileSync(HABITS_FILE, 'utf8'));
+    loadChallenges(); // Add this line
+
+function loadChallenges() {
+  try {
+    if (fs.existsSync(CHALLENGES_FILE)) challenges = JSON.parse(fs.readFileSync(CHALLENGES_FILE, 'utf8'));
+  } catch (e) {
+    console.error("Error loading challenges:", e);
+  }
+}
+
+function saveChallenges() {
+  try {
+    fs.writeFileSync(CHALLENGES_FILE, JSON.stringify(challenges, null, 2));
+  } catch (e) {
+    console.error("Save challenges error:", e);
+  }
+}
+
     console.log("Data loaded successfully");
   } catch (e) {
     console.error("Error loading data:", e);
@@ -123,9 +143,57 @@ async function notifyLoggingChannel(guild, content) {
   }
 }
 
+async function checkRoleRewards(userId, guild) {
+  if (!guild) return;
+  
+  const monthly = fitnessMonthly[userId];
+  if (!monthly) return;
+  
+  const roleRewards = {
+    10: { name: "Gym Rookie", color: 0x8B4513 },
+    25: { name: "Fitness Enthusiast", color: 0x32CD32 },
+    50: { name: "Workout Warrior", color: 0xFF6347 },
+    100: { name: "Iron Will", color: 0x708090 },
+    200: { name: "Beast Mode", color: 0x8B0000 }
+  };
+  
+  const total = monthly.yes;
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) return;
+  
+  for (const [threshold, roleData] of Object.entries(roleRewards)) {
+    if (total >= parseInt(threshold)) {
+      let role = guild.roles.cache.find(r => r.name === roleData.name);
+      if (!role) {
+        try {
+          role = await guild.roles.create({ 
+            name: roleData.name, 
+            color: roleData.color,
+            reason: "Fitness milestone reward role"
+          });
+        } catch (e) {
+          console.error("Role creation failed:", e);
+          continue;
+        }
+      }
+loadData(); // Add this line
+      
+      if (!member.roles.cache.has(role.id)) {
+        try {
+          await member.roles.add(role, `Earned ${roleData.name} with ${total} workouts`);
+          const channel = guild.channels.cache.find(ch => ch.name?.toLowerCase() === "general");
+          if (channel) {
+            await channel.send(`🎉 <@${userId}> earned the **${roleData.name}** role! ${total} workouts completed!`);
+          }
+        } catch (e) {
+          console.error("Role assignment failed:", e);
+        }
+      }
+    }
+  }
+}
+
 // Load data immediately after function definitions
-loadData();
-loadHabits();
 
 // ------------------ Discord Client Setup ------------------
 const client = new Client({
@@ -250,6 +318,8 @@ async function updateLeaderboardChannel() {
   try {
     try { await leaderboardChannel.bulkDelete(10); } catch (e) { /* ignore */ }
     await leaderboardChannel.send({ content: msg });
+    // Remove this line - we'll call checkRoleRewards elsewhere
+
   } catch (e) {
     console.error("updateLeaderboardChannel error:", e.message);
   }
@@ -266,6 +336,7 @@ process.on('SIGINT', () => {
   savePartners();
   saveStrikes();
   saveHabits();
+  saveChallenges();
   process.exit(0);
 
 });
@@ -280,6 +351,7 @@ process.on('SIGTERM', () => {
   savePartners();
   saveStrikes();
   saveHabits();
+  saveChallenges();
   process.exit(0);
 
 });
@@ -832,6 +904,7 @@ if (channelName === "daily-check-ins") {
   try { await updateLeaderboardChannel(); } catch (e) { console.error("updateLeaderboardChannel error:", e); }
   return;
 }
+await checkRoleRewards(authorId, guild);
 
   // !checkin-test (mod-only)
   if (message.content === "!checkin-test") {
@@ -1042,6 +1115,24 @@ if (message.content === "!habits") {
   return message.reply(msg);
 }
 
+// !workoutplan
+if (message.content.startsWith("!workoutplan ")) {
+  const type = message.content.split(" ")[1]?.toLowerCase();
+  const plans = {
+    push: "**Push Day:**\n• Push-ups: 3x12\n• Pike Push-ups: 3x8\n• Tricep Dips: 3x10\n• Plank: 3x30s\n• Diamond Push-ups: 2x8",
+    pull: "**Pull Day:**\n• Pull-ups: 3x5-8\n• Inverted Rows: 3x10\n• Face Pulls: 3x12\n• Dead Hang: 3x20s\n• Bicep Curls: 3x12",
+    legs: "**Leg Day:**\n• Squats: 3x15\n• Lunges: 3x10 each leg\n• Calf Raises: 3x15\n• Wall Sit: 3x30s\n• Bulgarian Split Squats: 2x8 each",
+    cardio: "**Cardio:**\n• 20min run/walk\n• Burpees: 3x5\n• Jumping Jacks: 3x20\n• High Knees: 3x30s\n• Mountain Climbers: 3x15",
+    core: "**Core:**\n• Plank: 3x45s\n• Crunches: 3x20\n• Russian Twists: 3x15\n• Leg Raises: 3x12\n• Dead Bug: 2x10 each"
+  };
+  
+  if (plans[type]) {
+    return message.reply(`${plans[type]}\n\n*Adjust reps based on your level. Rest 60-90s between sets.*`);
+  } else {
+    return message.reply("Available plans: `!workoutplan push/pull/legs/cardio/core`");
+  }
+}
+
   // !resetprogress
   if (message.content === "!resetprogress") {
     try {
@@ -1056,11 +1147,177 @@ if (message.content === "!habits") {
     }
   }
 
-  // !coach
-  if (message.content.startsWith("!coach")) {
-    const raw = message.content.split(" ").slice(1).join(" ").trim();
-    const topic = raw || "motivation and accountability for daily goals";
-    const coachPersona = `
+    // !quote
+if (message.content === "!quote") {
+  const quotes = [
+    "Discipline is choosing between what you want now and what you want most.",
+    "The cave you fear to enter holds the treasure you seek.",
+    "You are one workout away from a good mood.",
+    "Champions train, losers complain.",
+    "Your only competition is who you were yesterday.",
+    "Excellence is not a skill, it's an attitude.",
+    "Pain is temporary, quitting lasts forever.",
+    "The body achieves what the mind believes.",
+    "Strength doesn't come from comfort zones.",
+    "Every rep counts, every day matters."
+  ];
+  
+  const quote = quotes[Math.floor(Math.random() * quotes.length)];
+  return message.reply(`💡 ${quote}`);
+}
+
+    // !stats command
+if (message.content === "!stats") {
+  const weekly = fitnessWeekly[authorId] || { yes: 0, no: 0 };
+  const monthly = fitnessMonthly[authorId] || { yes: 0, no: 0 };
+  const habits = habitTracker[authorId] || {};
+
+  // Calculate position in leaderboard
+  const sorted = Object.entries(fitnessMonthly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
+  const position = sorted.findIndex(([uid]) => uid === authorId) + 1;
+
+  let msg = `📊 **${message.author.username}'s Stats**\n\n`;
+  msg += `**Fitness:**\n`;
+  msg += `• This week: ✅${weekly.yes} ❌${weekly.no}\n`;
+  msg += `• This month: ✅${monthly.yes} ❌${monthly.no}\n`;
+  msg += `• Success rate: ${monthly.yes + monthly.no > 0 ? Math.round((monthly.yes / (monthly.yes + monthly.no)) * 100) : 0}%\n`;
+  msg += `• Leaderboard position: ${position > 0 ? `#${position}` : 'Unranked'}\n\n`;
+
+  if (Object.keys(habits).length > 0) {
+    msg += `**Habits:**\n`;
+    Object.entries(habits).forEach(([habit, data]) => {
+      const today = new Date().toDateString();
+      const checkedToday = data.lastChecked === today ? " ✅" : "";
+      msg += `• ${habit}: ${data.streak}🔥 (${data.total} total)${checkedToday}\n`;
+    });
+  } else {
+    msg += `**Habits:** None tracked yet. Use \`!addhabit [habit]\` to start!\n`;
+  }
+
+  // Show active challenges
+  const userChallenges = Object.entries(challenges).filter(([id, chal]) =>
+    chal.participants.includes(authorId) && chal.guildId === guild?.id
+  );
+  if (userChallenges.length > 0) {
+    msg += `\n**Active Challenges:** ${userChallenges.length}\n`;
+    userChallenges.slice(0, 3).forEach(([id, chal]) => {
+      msg += `• ${chal.name}\n`;
+    });
+  }
+
+  return message.reply(msg);
+}
+
+// Separate challenge commands:
+
+// !challenge create (mod only)
+if (message.content.startsWith("!challenge create ")) {
+  const member = await message.guild?.members.fetch(message.author.id).catch(() => null);
+  if (!member || !isModeratorMember(member)) {
+    return message.reply("Only moderators can create challenges.");
+  }
+
+  const challengeText = message.content.slice(18).trim();
+  if (!challengeText) return message.reply("Usage: `!challenge create [challenge description]`");
+
+  const challengeId = Date.now().toString();
+  challenges[challengeId] = {
+    name: challengeText,
+    participants: [],
+    createdAt: new Date().toISOString(),
+    createdBy: authorId,
+    guildId: message.guild.id
+  };
+  saveChallenges();
+
+  const embed = new EmbedBuilder()
+    .setTitle("🏆 NEW CHALLENGE CREATED!")
+    .setDescription(challengeText)
+    .setColor(0x00AE86)
+    .setFooter({ text: `React with 💪 to join! ID: ${challengeId}` });
+
+  const msg = await message.channel.send({ embeds: [embed] });
+  await msg.react('💪');
+  return;
+}
+
+// !challenge join
+if (message.content.startsWith("!challenge join ")) {
+  const challengeId = message.content.slice(16).trim();
+  const challenge = challenges[challengeId];
+
+  if (!challenge) return message.reply("Challenge not found. Use `!challenges` to see active challenges.");
+  if (challenge.participants.includes(authorId)) return message.reply("You're already in this challenge!");
+
+  challenge.participants.push(authorId);
+  saveChallenges();
+  return message.reply(`You've joined the challenge: "${challenge.name}"! Good luck!`);
+}
+
+// !challenges
+if (message.content === "!challenges") {
+  const guildChallenges = Object.entries(challenges).filter(([id, chal]) =>
+    chal.guildId === message.guild?.id
+  );
+
+  if (!guildChallenges.length) return message.reply("No active challenges.");
+
+  let msg = "🏆 **Active Challenges:**\n";
+  guildChallenges.forEach(([id, chal]) => {
+    msg += `• **${chal.name}** (${chal.participants.length} participants) - ID: ${id}\n`;
+  });
+  msg += "\nUse `!challenge join [ID]` to join a challenge!";
+  return message.reply(msg);
+}
+
+// !setgoal command
+if (message.content.startsWith("!setgoal ")) {
+  const goal = parseInt(message.content.split(" ")[1]);
+  if (!goal || goal < 1 || goal > 21) {
+    return message.reply("Set a weekly workout goal between 1-21: `!setgoal 5`");
+  }
+
+  if (!memory.goals) memory.goals = {};
+  memory.goals[authorId] = goal;
+  saveMemory();
+
+  const current = fitnessWeekly[authorId]?.yes || 0;
+  return message.reply(`🎯 Weekly goal set to ${goal} workouts! Current progress: ${current}/${goal}`);
+}
+
+// !goal command
+if (message.content === "!goal") {
+  const goal = memory.goals?.[authorId];
+  if (!goal) return message.reply("No goal set. Use `!setgoal [number]` to set a weekly workout goal.");
+
+  const current = fitnessWeekly[authorId]?.yes || 0;
+  const percent = Math.min(Math.round((current / goal) * 100), 100);
+  const completed = Math.floor(percent / 10);
+  const remaining = 10 - completed;
+  const bar = "█".repeat(completed) + "░".repeat(remaining);
+
+  let statusEmoji = "🎯";
+  let message_text = "";
+
+  if (percent >= 100) {
+    statusEmoji = "🏆";
+    message_text = " - GOAL CRUSHED! 🔥";
+  } else if (percent >= 80) {
+    statusEmoji = "💪";
+    message_text = " - Almost there!";
+  } else if (percent >= 50) {
+    statusEmoji = "⚡";
+    message_text = " - Keep pushing!";
+  }
+
+  return message.reply(`${statusEmoji} **Weekly Goal Progress**\n${current}/${goal} workouts (${percent}%)${message_text}\n[${bar}]`);
+}
+
+// !coach command
+if (message.content.startsWith("!coach")) {
+  const raw = message.content.split(" ").slice(1).join(" ").trim();
+  const topic = raw || "motivation and accountability for daily goals";
+  const coachPersona = `
 You are GymBotBro's Coach persona. Blend three tones:
 1) The disciplined coach (clear, strategic, action-oriented),
 2) The motivational speaker (energetic, encouraging, vivid),
@@ -1069,14 +1326,14 @@ User request: "${topic}"
 Keep response concise (6-10 sentences), include 2 quick action steps the user can do today, one small affirmation line, and a short practical tip about staying consistent with habits.
 Do not lecture. Be direct, positive, and human. Use occasional emojis but not more than 3.
 `;
-    try {
-      const coachReply = await getOpenAIResponse(coachPersona);
-      return message.reply(coachReply);
-    } catch (e) {
-      console.error("!coach error:", e);
-      return message.reply("Coach is offline right now. Try again soon.");
-    }
+  try {
+    const coachReply = await getOpenAIResponse(coachPersona);
+    return message.reply(coachReply);
+  } catch (e) {
+    console.error("!coach error:", e);
+    return message.reply("Coach is offline right now. Try again soon.");
   }
+}
 
   // OpenAI persona for specific channels
   if (["tips and guide", "wealth", "health", "faith", "fitness"].includes(channelName)) {
