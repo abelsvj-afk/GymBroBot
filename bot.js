@@ -569,7 +569,7 @@ async function registerSlashCommandsForGuild(guild) {
 }
 
 // ------------------ Bot Ready Event ------------------
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   
   // Register slash commands for every guild the bot is in
@@ -600,7 +600,7 @@ client.once("ready", async () => {
     if (!ch) continue;
     try {
       const pinned = await ch.messages.fetchPins();
-      if (!pinned.some(m => m.content === message || (m.embeds && m.embeds.some(e => e.description === message)))) {
+      if (!Array.from(pinned.values()).some(m => m.content === message || (m.embeds && m.embeds.some(e => e.description === message)))) {
         const embed = new EmbedBuilder().setTitle(`Guide — #${name}`).setDescription(message).setColor(0x00AE86);
         const sent = await ch.send({ embeds: [embed] });
         try { await sent.pin(); } catch (e) {}
