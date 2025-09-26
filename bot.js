@@ -45,6 +45,7 @@ let fitnessMonthly = {};
 let partnerQueue = [];
 let partners = {};
 let strikes = {};
+let habitTracker = {};
 
 // ------------------ Configuration Constants ------------------
 const DATA_DIR = ".";
@@ -55,6 +56,7 @@ const FITNESS_MONTHLY_FILE = path.join(DATA_DIR, "fitnessMonthly.json");
 const PARTNER_QUEUE_FILE = path.join(DATA_DIR, "partnerQueue.json");
 const PARTNERS_FILE = path.join(DATA_DIR, "partners.json");
 const STRIKES_FILE = path.join(DATA_DIR, "strikes.json");
+const HABITS_FILE = path.join(DATA_DIR, "habits.json");
 
 const STRIKE_CONFIG = {
   warnCount: 1,
@@ -75,6 +77,7 @@ function loadData() {
     if (fs.existsSync(PARTNER_QUEUE_FILE)) partnerQueue = JSON.parse(fs.readFileSync(PARTNER_QUEUE_FILE, 'utf8'));
     if (fs.existsSync(PARTNERS_FILE)) partners = JSON.parse(fs.readFileSync(PARTNERS_FILE, 'utf8'));
     if (fs.existsSync(STRIKES_FILE)) strikes = JSON.parse(fs.readFileSync(STRIKES_FILE, 'utf8'));
+    if (fs.existsSync(HABITS_FILE)) habitTracker = JSON.parse(fs.readFileSync(HABITS_FILE, 'utf8'));
     console.log("Data loaded successfully");
   } catch (e) {
     console.error("Error loading data:", e);
@@ -88,6 +91,7 @@ function saveMonthly() { try { fs.writeFileSync(FITNESS_MONTHLY_FILE, JSON.strin
 function savePartnerQueue() { try { fs.writeFileSync(PARTNER_QUEUE_FILE, JSON.stringify(partnerQueue, null, 2)); } catch (e) { console.error("Save queue error:", e); } }
 function savePartners() { try { fs.writeFileSync(PARTNERS_FILE, JSON.stringify(partners, null, 2)); } catch (e) { console.error("Save partners error:", e); } }
 function saveStrikes() { try { fs.writeFileSync(STRIKES_FILE, JSON.stringify(strikes, null, 2)); } catch (e) { console.error("Save strikes error:", e); } }
+function saveHabits() {try { fs.writeFileSync(HABITS_FILE, JSON.stringify(habitTracker, null, 2)); } catch (e) { console.error("Save habits error:", e); } }
 
 // ------------------ Helper Functions ------------------
 function ensureStrikeRecord(guildId, userId) {
@@ -121,6 +125,7 @@ async function notifyLoggingChannel(guild, content) {
 
 // Load data immediately after function definitions
 loadData();
+loadHabits();
 
 // ------------------ Discord Client Setup ------------------
 const client = new Client({
@@ -260,7 +265,9 @@ process.on('SIGINT', () => {
   savePartnerQueue();
   savePartners();
   saveStrikes();
+  saveHabits();
   process.exit(0);
+
 });
 
 process.on('SIGTERM', () => {
@@ -272,7 +279,9 @@ process.on('SIGTERM', () => {
   savePartnerQueue();
   savePartners();
   saveStrikes();
+  saveHabits();
   process.exit(0);
+
 });
 // ------------------ Partner System Utilities ------------------
 async function findOrCreateAccountabilityCategory(guild) {
@@ -600,7 +609,7 @@ client.once("clientReady", async () => {
     if (!ch) continue;
     try {
       const pinned = await ch.messages.fetchPins();
-      if (!Array.from(pinned.values()).some(m => m.content === message || (m.embeds && m.embeds.some(e => e.description === message)))) {
+      if (!pinned.some(m => m.content === message || (m.embeds && m.embeds.some(e => e.description === message)))) {
         const embed = new EmbedBuilder().setTitle(`Guide — #${name}`).setDescription(message).setColor(0x00AE86);
         const sent = await ch.send({ embeds: [embed] });
         try { await sent.pin(); } catch (e) {}
@@ -791,26 +800,38 @@ client.on("messageCreate", async (message) => {
     return message.channel.send({ content: out });
   }
 
-  // Daily check-ins tracking
-  if (channelName === "daily-check-ins") {
-    if (!fitnessWeekly[authorId]) fitnessWeekly[authorId] = { yes: 0, no: 0 };
-    if (!fitnessMonthly[authorId]) fitnessMonthly[authorId] = { yes: 0, no: 0 };
+  // Enhanced Daily check-ins tracking
+if (channelName === "daily-check-ins") {
+  if (!fitnessWeekly[authorId]) fitnessWeekly[authorId] = { yes: 0, no: 0 };
+  if (!fitnessMonthly[authorId]) fitnessMonthly[authorId] = { yes: 0, no: 0 };
 
-    if (/done|✅|yes/i.test(message.content)) {
-      fitnessWeekly[authorId].yes += 1;
-      fitnessMonthly[authorId].yes += 1;
-    } else if (/not done|❌|no/i.test(message.content)) {
-      fitnessWeekly[authorId].no += 1;
-      fitnessMonthly[authorId].no += 1;
-    } else {
-      return; // Ignore non-explicit responses
-    }
-
-    saveWeekly();
-    saveMonthly();
-    try { await updateLeaderboardChannel(); } catch (e) { console.error("updateLeaderboardChannel error:", e); }
-    return;
+  const content = message.content.toLowerCase();
+  const positiveWords = ['workout', 'gym', 'ran', 'lifted', 'exercise', 'trained', 'done', 'completed', 'finished', 'yes', '✅', 'crushed', 'smashed', 'cardio', 'weights', 'pushups', 'pullups', 'squats'];
+  const negativeWords = ['rest day', 'skipped', 'missed', 'no workout', 'didn\'t', 'failed', 'no', '❌', 'sick', 'injured'];
+  
+  const hasPositive = positiveWords.some(word => content.includes(word));
+  const hasNegative = negativeWords.some(word => content.includes(word));
+  
+  if (hasPositive && !hasNegative) {
+    fitnessWeekly[authorId].yes += 1;
+    fitnessMonthly[authorId].yes += 1;
+    const encouragements = ['Beast mode!', 'Keep crushing it!', 'Unstoppable!', 'Champion mindset!'];
+    message.react('💪');
+    setTimeout(() => message.reply(encouragements[Math.floor(Math.random() * encouragements.length)]), 1000);
+  } else if (hasNegative && !hasPositive) {
+    fitnessWeekly[authorId].no += 1;
+    fitnessMonthly[authorId].no += 1;
+    message.react('❌');
+    setTimeout(() => message.reply('Tomorrow is a new day to dominate!'), 1000);
+  } else {
+    return; // Ignore ambiguous messages
   }
+  
+  saveWeekly();
+  saveMonthly();
+  try { await updateLeaderboardChannel(); } catch (e) { console.error("updateLeaderboardChannel error:", e); }
+  return;
+}
 
   // !checkin-test (mod-only)
   if (message.content === "!checkin-test") {
@@ -970,6 +991,56 @@ client.on("messageCreate", async (message) => {
       return message.reply("Couldn't fetch your progress right now.");
     }
   }
+
+  // !addhabit
+  if (message.content.startsWith("!addhabit ")) {
+  const habit = message.content.slice(10).trim();
+  if (!habit) return message.reply("Usage: `!addhabit [habit name]`");
+  
+  if (!habitTracker[authorId]) habitTracker[authorId] = {};
+  if (habitTracker[authorId][habit]) return message.reply("You already have this habit tracked!");
+  
+  habitTracker[authorId][habit] = { streak: 0, lastChecked: null, total: 0 };
+  saveHabits();
+  return message.reply(`Added habit: "${habit}". Use \`!check ${habit}\` to track it daily!`);
+}
+
+// !check
+if (message.content.startsWith("!check ")) {
+  const habit = message.content.slice(7).trim();
+  if (!habitTracker[authorId] || !habitTracker[authorId][habit]) {
+    return message.reply("Habit not found. Use `!addhabit [habit]` first.");
+  }
+  
+  const today = new Date().toDateString();
+  const habitData = habitTracker[authorId][habit];
+  
+  if (habitData.lastChecked === today) {
+    return message.reply("Already checked off today!");
+  }
+  
+  habitData.lastChecked = today;
+  habitData.streak += 1;
+  habitData.total += 1;
+  saveHabits();
+  
+  return message.reply(`${habit} checked! Streak: ${habitData.streak} days`);
+}
+
+// !habits
+if (message.content === "!habits") {
+  if (!habitTracker[authorId] || Object.keys(habitTracker[authorId]).length === 0) {
+    return message.reply("No habits tracked yet. Use `!addhabit [habit]` to start!");
+  }
+  
+  let msg = "**Your Habits:**\n";
+  Object.entries(habitTracker[authorId]).forEach(([habit, data]) => {
+    const today = new Date().toDateString();
+    const checkedToday = data.lastChecked === today ? " ✅" : "";
+    msg += `• ${habit}: ${data.streak} day streak (${data.total} total)${checkedToday}\n`;
+  });
+  return message.reply(msg);
+}
 
   // !resetprogress
   if (message.content === "!resetprogress") {
