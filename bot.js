@@ -1288,7 +1288,7 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ content: `Test strike applied to <@${u.id}>.`, ephemeral: false });
     }
 
-   } catch (e) {
+      } catch (e) {
     console.error("interaction handler error:", e);
     try {
       if (interaction.replied || interaction.deferred) {
@@ -1301,7 +1301,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   } // closes outer try/catch
 }); // closes client.on("interactionCreate")
-// Add this to the end of your bot.js file to complete the missing parts:
+
 
 // ------------------ Data persistence & helper functions ------------------
 let memory = {};
