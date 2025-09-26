@@ -1473,7 +1473,8 @@ if (["tips and guide", "wealth", "health", "faith", "fitness"].includes(channelN
       case "tips and guide":
         channelTraits = "Provide tactical life hacks and practical advice for everyday challenges.";
         break;
-       const context = userMemory.previousMessages.length ? `Consider previous messages: ${userMemory.previousMessages.join(" | ")}` : "";
+    }
+    const context = userMemory.previousMessages.length ? `Consider previous messages: ${userMemory.previousMessages.join(" | ")}` : "";
     return `${basePersona}
 ${channelTraits}
 ${context}
