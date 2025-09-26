@@ -726,7 +726,7 @@ cron.schedule("0 11 * * *", async () => {
   const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "wealth");
   if (!ch) return;
   const tip = await getOpenAIResponse("Provide a practical daily wealth tip for investing, business, money management, stocks, crypto, life insurance, entrepreneurship, leveraging debt, LLCs, banking, and financial growth.");
-  await ch.send({ content: `💰 Daily Wealth Tip:\n${tip}` });
+  await ch.send({ content: `   Daily Wealth Tip:\n${tip}` });
 }, { timezone: "America/New_York" });
 
 // Daily health news 10AM
@@ -734,7 +734,7 @@ cron.schedule("0 10 * * *", async () => {
   const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "health");
   if (!ch) return;
   const news = await getHealthNews();
-  await ch.send({ content: `🩺 Daily Health News:\n${news}` });
+  await ch.send({ content: `   Daily Health News:\n${news}` });
 }, { timezone: "America/New_York" });
 
 // Sports updates 8am, 12pm, 4pm
@@ -744,7 +744,7 @@ fightTimes.forEach(t => {
     const ch = client.channels.cache.find(c => (c.name || "").toLowerCase() === "sports");
     if (!ch) return;
     const u = await getSportsUpdates();
-    await ch.send({ content: `🥊 Combat & Sports Update:\n${u}` });
+    await ch.send({ content: `   Combat & Sports Update:\n${u}` });
   }, { timezone: "America/New_York" });
 });
 
@@ -765,7 +765,7 @@ cron.schedule("0 8 * * *", async () => {
   for (const [uid, date] of Object.entries(birthdays)) {
     const birthMd = date.slice(5);
     if (birthMd === mmdd) {
-      await ch.send(`🎉 Today is <@${uid}>'s birthday! Go shout them a happy birthday! 🎂`);
+      await ch.send(`   Today is <@${uid}>'s birthday! Go shout them a happy birthday!   `);
     }
   }
 }, { timezone: "America/New_York" });
@@ -776,11 +776,11 @@ cron.schedule("0 0 * * 0", async () => {
   if (!ch) return;
   const sorted = Object.entries(fitnessWeekly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
 
-  let msg = `🏅 WEEKLY FITNESS TEST DUMP 🏅\n`;
-  if (sorted.length) msg += `🥇 <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
-  msg += `\n💥 Weekly Top 5 (TEST):\n`;
+  let msg = `   WEEKLY FITNESS TEST DUMP   \n`;
+  if (sorted.length) msg += `   <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
+  msg += `\n   Weekly Top 5 (TEST):\n`;
 
-  const medals = ["🥇", "🥈", "🥉", "🏅", "💪"];
+  const medals = ["  ", "  ", "  ", "  ", "  "];
 
   sorted.slice(0, 5).forEach(([uid, data], idx) => {
     msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
@@ -800,12 +800,12 @@ cron.schedule("0 0 1 * *", async () => {
   if (!ch) return;
   const sorted = Object.entries(fitnessMonthly).sort((a,b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
 
-  let msg = `🏆 Monthly Fitness Winner 🏆\n`;
+  let msg = `   Monthly Fitness Winner   \n`;
   if (sorted.length) msg += `   <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}\n`;
-  msg += `\n🔥 Monthly Top 5:\n`;
+  msg += `\n   Monthly Top 5:\n`;
 
   sorted.slice(0,5).forEach(([uid, data], idx) => {
-    const medals = ["🥇","🥈","🥉","🏅","🏅"];
+    const medals = ["  ","  ","  ","  ","  "];
     msg += `${medals[idx]} <@${uid}> - ✅ ${data.yes} | ❌ ${data.no}\n`;
   });
 
@@ -960,13 +960,13 @@ client.on("messageCreate", async (message) => {
     if (!leaderboardChannel) return message.reply("No #leaderboard channel found.");
 
     const sorted = Object.entries(fitnessWeekly).sort((a, b) => (b[1].yes - b[1].no) - (a[1].yes - a[1].no));
-    let msg = `🏅 WEEKLY FITNESS TEST DUMP 🏅\n`;
+    let msg = `   WEEKLY FITNESS TEST DUMP   \n`;
 // ...
-msg += `\n💥 Weekly Top 5 (TEST):\n`;
+msg += `\n   Weekly Top 5 (TEST):\n`;
 
     if (sorted.length) msg += `   <@${sorted[0][0]}> with ✅ ${sorted[0][1].yes} | ❌ ${sorted[0][1].no}
 `;
-    msg += \\n💥 Weekly Top 5 (TEST):\n`;`
+    msg += `\n   Weekly Top 5 (TEST):\n`;
 
     const medals = ["  ", "  ", "  ", "  ️", "  "];
     sorted.slice(0, 5).forEach(([uid, data], idx) => {
@@ -1355,7 +1355,7 @@ if (message.content === "!challenges") {
 
   if (!guildChallenges.length) return message.reply("No active challenges.");
 
-  let msg = `🏆 Active Challenges:\n`;
+  let msg = `   Active Challenges:\n`;
   guildChallenges.forEach(([id, chal]) => {
     msg += `• **${chal.name}** (${chal.participants.length} participants) - ID: ${id}\n`;
   });
