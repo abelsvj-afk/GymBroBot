@@ -1074,12 +1074,12 @@ const commandHandlers = {
     if (isYes) {
       fitnessWeekly[authorId].yes += 1;
       // react with proper emoji and send fixed reply
-      try { await message.react('💪'); } catch(e){}
+  try { await message.react('\u{1F4AA}'); } catch(e){}
       message.reply("Beast mode activated! 🔥");
       if (pendingCheckins[authorId]) delete pendingCheckins[authorId];
     } else {
       fitnessWeekly[authorId].no += 1;
-      try { await message.react('❌'); } catch(e){}
+  try { await message.react('\u274C'); } catch(e){}
       message.reply("Tomorrow is a new day! 💯");
       if (pendingCheckins[authorId]) delete pendingCheckins[authorId];
     }
@@ -1431,8 +1431,9 @@ const commandHandlers = {
     if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
 
     try {
-      const cmdDefs = Object.keys(commandHandlers).map(name => ({
-        name: name.toLowerCase().slice(0,32),
+      const uniqueNames = [...new Set(Object.keys(normalizedCommandHandlers).map(n => n.toLowerCase().slice(0,32)))];
+      const cmdDefs = uniqueNames.map(name => ({
+        name: name,
         description: `Run ${name} (prefix: !${name})`,
         options: [ { name: 'text', type: 3, description: 'Arguments as a single string', required: false } ]
       }));
@@ -1797,6 +1798,13 @@ const commandHandlers = {
   }
 };
 
+// Build a normalized map (lowercased keys) so prefix commands and slash interactions
+// find handlers regardless of original casing (some handlers use camelCase names).
+const normalizedCommandHandlers = {};
+Object.keys(commandHandlers).forEach(k => {
+  normalizedCommandHandlers[k.toLowerCase()] = commandHandlers[k];
+});
+
 // ---------------- Message Handler ----------------
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
@@ -1870,11 +1878,11 @@ client.on("messageCreate", async (message) => {
         fitnessWeekly[uid] = fitnessWeekly[uid] || { yes: 0, no: 0 };
         if (['yes', 'y'].includes(body)) {
           fitnessWeekly[uid].yes = (fitnessWeekly[uid].yes || 0) + 1;
-          try { await message.react('💪'); } catch(e){}
+          try { await message.react('\u{1F4AA}'); } catch(e){}
           await sendNormalized(message.channel, "Beast mode activated! 🔥");
         } else {
           fitnessWeekly[uid].no = (fitnessWeekly[uid].no || 0) + 1;
-          try { await message.react('❌'); } catch(e){}
+          try { await message.react('\u274C'); } catch(e){}
           await sendNormalized(message.channel, "Tomorrow is a new day! 💯");
         }
         delete pendingCheckins[uid];
@@ -1899,9 +1907,10 @@ client.on("messageCreate", async (message) => {
     const args = message.content.slice(1).trim().split(/ +/g);
     const command = args.shift().toLowerCase();
 
-    if (commandHandlers[command]) {
+    const handler = normalizedCommandHandlers[command];
+    if (handler) {
       try {
-        await commandHandlers[command](message, args);
+        await handler(message, args);
       } catch (e) {
         console.error(`Error in command ${command}:`, e);
         message.reply("Something went wrong. Try again later.");
@@ -2260,8 +2269,10 @@ client.once('ready', async () => {
   
   // --- Slash command registration: create a simple slash command per prefix command ---
   try {
-    const cmdDefs = Object.keys(commandHandlers).map(name => ({
-      name: name.toLowerCase().slice(0,32),
+    // create unique, lowercased slash command names from normalized handlers
+    const uniqueNames = [...new Set(Object.keys(normalizedCommandHandlers).map(n => n.toLowerCase().slice(0,32)))];
+    const cmdDefs = uniqueNames.map(name => ({
+      name: name,
       description: `Run ${name} (prefix: !${name})`,
       options: [ { name: 'text', type: 3, description: 'Arguments as a single string', required: false } ]
     }));
@@ -2288,7 +2299,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
     const msg = reaction.message;
     if (!msg) return;
     // If the message contains a challenge identifier (simple heuristic)
-    if (reaction.emoji && reaction.emoji.name === '💪') {
+  if (reaction.emoji && reaction.emoji.name === '\u{1F4AA}') {
       // find challenge by message id or channel context
       const chId = msg.channel.id;
       // naive: add user to a challenge list in memory keyed by message id
@@ -2326,9 +2337,9 @@ process.on('SIGTERM', () => {
 client.on('interactionCreate', async (interaction) => {
   try {
     if (!interaction.isCommand?.()) return;
-    const name = interaction.commandName;
-    const handler = commandHandlers[name];
-    if (!handler) return interaction.reply({ content: 'Command handler not found for: ' + name, ephemeral: true });
+  const name = interaction.commandName;
+  const handler = normalizedCommandHandlers[name.toLowerCase()];
+  if (!handler) return interaction.reply({ content: 'Command handler not found for: ' + name, ephemeral: true });
 
     const text = interaction.options.getString('text') || '';
     const args = text.trim() ? text.trim().split(/ +/g) : [];
@@ -2343,7 +2354,7 @@ client.on('interactionCreate', async (interaction) => {
       reply: async (payload) => {
         const content = typeof payload === 'string' ? payload : (payload.content || JSON.stringify(payload));
         if (!interaction.replied && !interaction.deferred) return interaction.reply({ content, fetchReply: true });
-        return interaction.followUp({ content, fetchReply: true });
+        return interaction.followUp({ content });
       }
     };
 
