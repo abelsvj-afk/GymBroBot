@@ -138,6 +138,31 @@ const saveWealthTips = () => saveLoadMap.wealthTips[0]();
 const saveFitnessPosts = () => saveLoadMap.fitnessPosts[0]();
 const saveAiHealth = () => saveLoadMap.aiHealth[0]();
 
+// ----- Additional explicit file handles and helpers requested -----
+// Provide the file path constants the user referenced and small save/load helpers
+const birthdaysFile = files.birthdays;
+const monthlyFile = files.monthly;
+const partnersFile = files.partners;
+const partnerQueueFile = files.partnerQueue;
+const strikesFile = files.strikes;
+const challengesFile = files.challenges;
+
+// Explicit save function for birthdays (not present earlier)
+function saveBirthdays() { try { safeWrite(birthdaysFile, birthdays); } catch(e){ console.error('saveBirthdays', e); } }
+
+// Explicit load functions (for completeness / easier merging with other bot versions)
+function loadBirthdays() { birthdays = safeRead(birthdaysFile, {}); }
+function loadMonthly() { fitnessMonthly = safeRead(monthlyFile, {}); }
+function loadPartners() { partners = safeRead(partnersFile, {}); }
+function loadPartnerQueue() { partnerQueue = safeRead(partnerQueueFile, []); }
+function loadStrikes() { strikes = safeRead(strikesFile, {}); }
+function loadChallenges() { challenges = safeRead(challengesFile, {}); }
+
+// Backwards-compatible loader: call the existing loadAllData implementation
+// Some external copies of this bot expect a function named `loadData()`; provide it as an alias.
+function loadData() { loadAllData(); }
+
+
 // ---------------- Express ----------------
 app.use(express.json());
 app.get('/', (req,res)=>res.json({ status:'GymBotBro running', uptime:process.uptime(), guilds:client.guilds.cache.size, users:client.users.cache.size }));
@@ -240,7 +265,7 @@ async function pinCommandDocs(guild) {
 
     const adminDoc = `GymBotBro Admin Instructions:\n\n1) Managing AI model\n- Use \`!setmodel <model> [--save] [--force]\` to change models.\n  - Without --force the bot validates model availability.\n  - Use --save to persist to .env in the repo root (Railway will pick ENV var from project settings).\n- Use \`!getmodel\` to view current model and fallback.\n- Use \`!testai\` to run a quick health check (admins only).\n\n2) Deployment notes for Railway:\n- Set environment variables in Railway project settings (OPENAI_API_KEY, OPENAI_MODEL, FALLBACK_OPENAI_MODEL, DISCORD_TOKEN).\n- When you change OPENAI_MODEL via CLI or Railway UI, restart the service to apply unless you use \`!setmodel --save\`.\n\n3) Coordination with myninja AI / GitHub:\n- myninja AI may push code changes to this repo. If you persist changes via \`.env\` and myninja also updates files, ensure you sync changes and don't overwrite .env in CI.\n`;
 
-  const loggingDoc = `GymBotBro Logging Channel – Purpose & Usage:\n\nThis channel is for audit logs only. Do NOT post general instructions here.\nLogs posted here include:\n- Model changes (who changed model, from->to, saved to .env)\n- AI health checks and failures\n- Startup fallback switches\n\nAvailable logging commands (admins):\n- !getmodel -> shows current model & fallback\n- !testai -> runs a quick AI health check (60s cooldown per guild)\n- !setmodel <model> [--save] [--force] -> change primary model\n- !setfallback <model> [--save] -> change fallback model\n\nMongo integration (optional):\n- If you set MONGO_URI in the deployment environment (MongoDB Atlas connection string), audit logs will be recorded to the 'ai_health' collection for long-term storage.\n\nPinned messages here are for logging policy and retention. Only admins should unpin.`;
+  const loggingDoc = `GymBotBro Logging Channel ΓÇô Purpose & Usage:\n\nThis channel is for audit logs only. Do NOT post general instructions here.\nLogs posted here include:\n- Model changes (who changed model, from->to, saved to .env)\n- AI health checks and failures\n- Startup fallback switches\n\nAvailable logging commands (admins):\n- !getmodel -> shows current model & fallback\n- !testai -> runs a quick AI health check (60s cooldown per guild)\n- !setmodel <model> [--save] [--force] -> change primary model\n- !setfallback <model> [--save] -> change fallback model\n\nMongo integration (optional):\n- If you set MONGO_URI in the deployment environment (MongoDB Atlas connection string), audit logs will be recorded to the 'ai_health' collection for long-term storage.\n\nPinned messages here are for logging policy and retention. Only admins should unpin.`;
 
     // Admin/mod channels: post adminDoc
     for (const key of ['admin', 'mod']) {
@@ -471,6 +496,79 @@ async function createPrivateChannelForPair(guild, userAId, userBId, pairType = '
   return channel;
 }
 
+// Find or create a category named 'Accountability Partners' and return it
+async function findOrCreateAccountabilityCategory(guild) {
+  try {
+    const name = 'Accountability Partners';
+    const existing = guild.channels.cache.find(c => c.type === ChannelType.GuildCategory && (c.name || '').toLowerCase() === name.toLowerCase());
+    if (existing) return existing;
+    const cat = await guild.channels.create({ name, type: ChannelType.GuildCategory, reason: 'Create category for accountability partner private channels' });
+    return cat;
+  } catch (e) { console.error('findOrCreateAccountabilityCategory error:', e); return null; }
+}
+
+// Higher-level partner channel creator that ensures category placement and richer naming
+async function createPartnerChannel(guild, userAId, userBId, options = {}) {
+  try {
+    const category = await findOrCreateAccountabilityCategory(guild).catch(()=>null);
+
+    // Use safer username-based names when possible
+    const userA = await client.users.fetch(userAId).catch(()=>null);
+    const userB = await client.users.fetch(userBId).catch(()=>null);
+    const safe = (u, fallback) => (u && u.username ? u.username.toLowerCase().replace(/[^a-z0-9-]/g,'').slice(0,8) : (fallback||'user'));
+    const channelName = `partner-${safe(userA,userAId.slice(0,6))}-${safe(userB,userBId.slice(0,6))}`.slice(0,90);
+
+    const channel = await guild.channels.create({ name: channelName, type: ChannelType.GuildText, reason: 'Create partner private channel' });
+    // Move into category if available
+    try { if (category) await channel.setParent(category.id); } catch(e){}
+
+    // Set permissions similar to createPrivateChannelForPair
+    try {
+      const everyoneRole = guild.roles.everyone.id;
+      const perms = [ { id: everyoneRole, deny: [PermissionFlagsBits.ViewChannel] } ];
+      perms.push({ id: userAId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+      perms.push({ id: userBId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+      const modRole = guild.roles.cache.find(r => r.name && r.name.toLowerCase().includes('mod'));
+      if (modRole) perms.push({ id: modRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory] });
+      await channel.permissionOverwrites.set(perms);
+    } catch (e) { console.error('set perms error:', e); }
+
+    // Initialize partner record and save
+    partners[channel.id] = { channelId: channel.id, guildId: guild.id, userA: userAId, userB: userBId, type: options.type || 'goal', createdAt: Date.now(), exposure: { [userAId]: { messagesExchanged:0, firstInteraction:null }, [userBId]: { messagesExchanged:0, firstInteraction:null } } };
+    matches[userAId] = channel.id; matches[userBId] = channel.id;
+    strikes[channel.id] = { [userAId]: 0, [userBId]: 0 };
+    savePartners(); if (saveMatches) saveMatches(); if (saveStrikes) saveStrikes();
+
+    // Post initial pinned rules like the other implementation
+    try { await postInitialPinnedRules(channel, partners[channel.id]); } catch(e){console.error('postInitialPinnedRules',e)}
+
+    try { (await client.users.fetch(userAId)).send(`You were paired with <@${userBId}>. Channel: ${channel.toString()}`); } catch {}
+    try { (await client.users.fetch(userBId)).send(`You were paired with <@${userAId}>. Channel: ${channel.toString()}`); } catch {}
+
+    return channel;
+  } catch (e) { console.error('createPartnerChannel error:', e); return null; }
+}
+
+async function endPartnerChannel(channelObj, reason = 'Partner ended') {
+  try {
+    const ch = typeof channelObj === 'string' ? client.channels.cache.get(channelObj) : channelObj;
+    if (!ch) return false;
+    const rec = partners[ch.id];
+    if (rec) {
+      const users = [rec.userA, rec.userB].filter(Boolean);
+      delete partners[ch.id]; savePartners();
+      users.forEach(uid => { if (matches[uid] && matches[uid] === ch.id) delete matches[uid]; });
+      if (saveMatches) saveMatches();
+      try { await ch.delete(`Partner ended: ${reason}`); } catch(e){}
+      users.forEach(uid => {
+        try { (async()=>{ const u = await client.users.fetch(uid).catch(()=>null); if(u) u.send(`Your partner channel was ended: ${reason}`); })(); } catch(e){}
+      });
+      return true;
+    }
+    return false;
+  } catch (e) { console.error('endPartnerChannel error:', e); return false; }
+}
+
 // ---------------- Pin Initial Rules ----------------
 async function postInitialPinnedRules(channel, partnerRecord) {
   const rules = [
@@ -482,7 +580,7 @@ async function postInitialPinnedRules(channel, partnerRecord) {
   const pinnedRules = await channel.send({ content: rules });
   await pinnedRules.pin();
 
-  const checkinTemplate = await channel.send(`Check-in template:\n• How was your workout today?\n• Any blockers?\n• Plan for tomorrow:`);
+  const checkinTemplate = await channel.send(`Check-in template:\nΓÇó How was your workout today?\nΓÇó Any blockers?\nΓÇó Plan for tomorrow:`);
   await checkinTemplate.pin();
 }
 
@@ -577,7 +675,7 @@ function checkExposureUnlocks(channelId) {
         return parts.slice(0, tier).join('\n') || hidden;
       };
 
-      await channel.send(`🔓 **Incremental exposure update:** Tier ${minTier} unlocked! Be respectful.`);
+      await channel.send(`≡ƒöô **Incremental exposure update:** Tier ${minTier} unlocked! Be respectful.`);
       const userA = await client.users.fetch(aId);
       const userB = await client.users.fetch(bId);
       try { await userA.send(`New info about your partner (Tier ${minTier}):\n${reveal(bId, minTier)}`); } catch { await channel.send('DM to userA blocked'); }
@@ -586,17 +684,88 @@ function checkExposureUnlocks(channelId) {
   }
 }
 
+// Ensure a normalized strike record exists for a guild/channel & user.
+// This function is tolerant of different strike storage shapes used across versions.
+function ensureStrikeRecord(scopeId, userId) {
+  try {
+    if (!strikes[scopeId]) strikes[scopeId] = {};
+    if (typeof strikes[scopeId][userId] === 'undefined') strikes[scopeId][userId] = 0;
+    return strikes[scopeId][userId];
+  } catch (e) { console.error('ensureStrikeRecord error:', e); return 0; }
+}
+
+function isModeratorMember(member) {
+  try {
+    return member && member.permissions && member.permissions.has && member.permissions.has(PermissionFlagsBits.ManageMessages);
+  } catch (e) { return false; }
+}
+
+async function notifyLoggingChannel(guild, content) {
+  try {
+    const log = guild.channels.cache.find(ch => (ch.name||'').toLowerCase().includes('log') || (ch.name||'').toLowerCase() === 'mod-logs' || (ch.name||'').toLowerCase() === 'logging');
+    if (log) await log.send(content);
+  } catch (e) { console.error('notifyLoggingChannel error:', e); }
+}
+
+// Optional: return a list of recommended fitness videos using YouTube Data API if available
+async function getRandomFitnessVideos(count = 2) {
+  try {
+    if (!process.env.YOUTUBE_API_KEY) return [`YouTube API key not configured.`];
+    const { google } = await import('googleapis');
+    const youtube = google.youtube({ version: 'v3', auth: process.env.YOUTUBE_API_KEY });
+    const queries = [
+      "men's mobility workout",
+      'calisthenics for men',
+      'bodyweight strength routine',
+      'hybrid calisthenics workout',
+      'mobility for lifters'
+    ];
+    const q = queries[Math.floor(Math.random()*queries.length)];
+    const res = await youtube.search.list({ part: 'snippet', q, maxResults: 10, type: 'video', relevanceLanguage: 'en' });
+    const items = res.data.items || [];
+    if (!items.length) return ['No videos found.'];
+    const shuffled = items.sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, count).map(i => `${i.snippet.title} | https://www.youtube.com/watch?v=${i.id.videoId}`);
+  } catch (e) { console.error('getRandomFitnessVideos error:', e); return ['Error fetching videos.']; }
+}
+
+// Optional: fetch a top health news headline if NEWS_API_KEY is present
+async function getHealthNews() {
+  try {
+    if (!process.env.NEWS_API_KEY) return 'No News API key provided.';
+    const res = await axios.get(`https://newsapi.org/v2/top-headlines?category=health&language=en&pageSize=1&apiKey=${process.env.NEWS_API_KEY}`);
+    const top = res.data.articles && res.data.articles[0];
+    if (!top) return 'No health news today.';
+    return `${top.title} — ${top.source.name}\n${top.url}`;
+  } catch (e) { console.error('getHealthNews error:', e); return 'Could not fetch health news.'; }
+}
+
+// Update the leaderboard channel with a simple snapshot (non-destructive helper)
+async function updateLeaderboardChannel() {
+  try {
+    const channel = client.channels.cache.find(ch => (ch.name||'').toLowerCase() === 'leaderboard');
+    if (!channel) return;
+    const sorted = Object.entries(fitnessWeekly).sort((a,b)=> (b[1].yes||0) - (a[1].yes||0));
+    if (!sorted.length) { await channel.send('No weekly fitness data yet.'); return; }
+    const medals = ['🥇','🥈','🥉'];
+    let msg = '**WEEKLY LEADERBOARD**\n\n';
+    sorted.slice(0,10).forEach(([uid,data],i)=>{ msg += `${medals[i]||'🔹'} <@${uid}> — ${data.yes||0} workouts\n`; });
+    try { await channel.bulkDelete(10).catch(()=>{}); } catch(e){}
+    await channel.send(msg);
+  } catch (e) { console.error('updateLeaderboardChannel error:', e); }
+}
+
 // ---------------- Command Handlers ----------------
 const commandHandlers = {
   async help(message) {
     const embed = new EmbedBuilder()
-      .setTitle("💪 GymBotBro Commands")
+      .setTitle("≡ƒÆ¬ GymBotBro Commands")
       .setDescription("Your accountability partner for fitness and life!")
       .addFields(
-        { name: "🎯 Fitness", value: "`!track yes/no` - Log workout\n`!progress` - View stats\n`!leaderboard` - Rankings", inline: true },
-        { name: "📈 Habits", value: "`!addhabit [habit]` - Track habit\n`!habits` - View habits\n`!check [habit]` - Check off", inline: true },
-        { name: "💪 Coaching", value: "`!coach [question]` - Get advice\n`!quote` - Motivation\n`!workoutplan` - Get workout", inline: true },
-        { name: "👥 Partners", value: "`!partner goal` - Find accountability partner\n`!partner future` - Find future partner\n`!leavequeue` - Exit matching queue", inline: true }
+        { name: "≡ƒÄ» Fitness", value: "`!track yes/no` - Log workout\n`!progress` - View stats\n`!leaderboard` - Rankings", inline: true },
+        { name: "≡ƒôê Habits", value: "`!addhabit [habit]` - Track habit\n`!habits` - View habits\n`!check [habit]` - Check off", inline: true },
+        { name: "≡ƒÆ¬ Coaching", value: "`!coach [question]` - Get advice\n`!quote` - Motivation\n`!workoutplan` - Get workout", inline: true },
+        { name: "≡ƒæÑ Partners", value: "`!partner goal` - Find accountability partner\n`!partner future` - Find future partner\n`!leavequeue` - Exit matching queue", inline: true }
       )
       .setColor(0x00AE86);
 
@@ -613,7 +782,7 @@ const commandHandlers = {
 
     try {
       const response = await getOpenAIResponse(prompt);
-      return message.reply(`💪 **Coach says:**\n${response}`);
+      return message.reply(`≡ƒÆ¬ **Coach says:**\n${response}`);
     } catch (error) {
       return message.reply("I'm having trouble thinking right now, try again!");
     }
@@ -632,12 +801,12 @@ const commandHandlers = {
     
     if (isYes) {
       fitnessWeekly[authorId].yes += 1;
-      await message.react('💪');
-      message.reply("Beast mode activated! 🔥");
+      await message.react('≡ƒÆ¬');
+      message.reply("Beast mode activated! ≡ƒöÑ");
     } else {
       fitnessWeekly[authorId].no += 1;
-      await message.react('❌');
-      message.reply("Tomorrow is a new day! 💯");
+      await message.react('Γ¥î');
+      message.reply("Tomorrow is a new day! ≡ƒÆ»");
     }
 
     saveWeekly();
@@ -651,9 +820,9 @@ const commandHandlers = {
     const rate = total > 0 ? Math.round((data.yes / total) * 100) : 0;
 
     const embed = new EmbedBuilder()
-      .setTitle(`📊 ${message.author.username}'s Progress`)
+      .setTitle(`≡ƒôè ${message.author.username}'s Progress`)
       .addFields(
-        { name: "This Week", value: `✅ ${data.yes} workouts\n❌ ${data.no} missed\nSuccess Rate: ${rate}%`, inline: true }
+        { name: "This Week", value: `Γ£à ${data.yes} workouts\nΓ¥î ${data.no} missed\nSuccess Rate: ${rate}%`, inline: true }
       )
       .setColor(rate >= 70 ? 0x00FF00 : rate >= 50 ? 0xFFFF00 : 0xFF0000);
 
@@ -665,11 +834,11 @@ const commandHandlers = {
     
     if (!sorted.length) return message.reply("No fitness data recorded this week.");
     
-    let msg = "🏆 **WEEKLY LEADERBOARD** 🏆\n\n";
-    const medals = ["🥇", "🥈", "🥉"];
+    let msg = "≡ƒÅå **WEEKLY LEADERBOARD** ≡ƒÅå\n\n";
+    const medals = ["≡ƒÑç", "≡ƒÑê", "≡ƒÑë"];
     
     sorted.slice(0, 5).forEach(([userId, data], index) => {
-      msg += `${medals[index] || "🔸"} <@${userId}> - ${data.yes} workouts\n`;
+      msg += `${medals[index] || "≡ƒö╕"} <@${userId}> - ${data.yes} workouts\n`;
     });
     
     return message.reply(msg);
@@ -693,7 +862,7 @@ const commandHandlers = {
     };
     
     saveHabits();
-    return message.reply(`✅ Started tracking: **${habit}**\nUse \`!check ${habit}\` daily!`);
+    return message.reply(`Γ£à Started tracking: **${habit}**\nUse \`!check ${habit}\` daily!`);
   },
 
   async habits(message) {
@@ -704,11 +873,11 @@ const commandHandlers = {
       return message.reply("No habits tracked! Use `!addhabit [habit]` to start.");
     }
 
-    let msg = `📈 **${message.author.username}'s Habits:**\n\n`;
+    let msg = `≡ƒôê **${message.author.username}'s Habits:**\n\n`;
     Object.entries(userHabits).forEach(([habit, data]) => {
       const today = new Date().toDateString();
-      const checkedToday = data.lastChecked === today ? " ✅" : "";
-      msg += `• **${habit}**: ${data.streak} day streak${checkedToday}\n`;
+      const checkedToday = data.lastChecked === today ? " Γ£à" : "";
+      msg += `ΓÇó **${habit}**: ${data.streak} day streak${checkedToday}\n`;
     });
 
     return message.reply(msg);
@@ -727,7 +896,7 @@ const commandHandlers = {
     const habitData = habitTracker[authorId][habit];
 
     if (habitData.lastChecked === today) {
-      return message.reply("Already checked off today! 🎉");
+      return message.reply("Already checked off today! ≡ƒÄë");
     }
 
     habitData.streak += 1;
@@ -736,19 +905,19 @@ const commandHandlers = {
 
     saveHabits();
 
-    return message.reply(`✅ **${habit}** checked off!\n🔥 Streak: ${habitData.streak} days`);
+    return message.reply(`Γ£à **${habit}** checked off!\n≡ƒöÑ Streak: ${habitData.streak} days`);
   },
 
   async quote(message) {
     const quotes = [
-      "💪 The only bad workout is the one that didn't happen.",
-      "🔥 Your body can stand almost anything. It's your mind you have to convince.",
-      "⚡ Success isn't given. It's earned in the gym.",
-      "🏆 The pain you feel today will be the strength you feel tomorrow.",
-      "💯 Your only limit is your mind. Push past it.",
-      "🎯 Don't wish for it, work for it.",
-      "💎 Diamonds are formed under pressure.",
-      "⭐ Be stronger than your excuses."
+      "≡ƒÆ¬ The only bad workout is the one that didn't happen.",
+      "≡ƒöÑ Your body can stand almost anything. It's your mind you have to convince.",
+      "ΓÜí Success isn't given. It's earned in the gym.",
+      "≡ƒÅå The pain you feel today will be the strength you feel tomorrow.",
+      "≡ƒÆ» Your only limit is your mind. Push past it.",
+      "≡ƒÄ» Don't wish for it, work for it.",
+      "≡ƒÆÄ Diamonds are formed under pressure.",
+      "Γ¡É Be stronger than your excuses."
     ];
     
     const quote = quotes[Math.floor(Math.random() * quotes.length)];
@@ -837,7 +1006,7 @@ const commandHandlers = {
 
     if (!entries.length) return message.reply('No ai health events found.');
 
-    const fields = entries.map(e => ({ name: new Date(e.ts).toLocaleString(), value: `${e.type} • ${e.model||''} • ${e.user?`by <@${e.user}>` : ''} ${e.ok===false?`• ERROR: ${e.error}`:''}` })).slice(0,10);
+    const fields = entries.map(e => ({ name: new Date(e.ts).toLocaleString(), value: `${e.type} ΓÇó ${e.model||''} ΓÇó ${e.user?`by <@${e.user}>` : ''} ${e.ok===false?`ΓÇó ERROR: ${e.error}`:''}` })).slice(0,10);
     await sendLogEmbed(message.channel, 'AI Health (recent)', fields);
   },
 
@@ -867,18 +1036,46 @@ const commandHandlers = {
     return reply.edit(`AI check OK (model: ${OPENAI_MODEL}, ${res.duration}ms). Sample: ${res.sample}`);
   },
 
+  // Admin utility: re-register slash commands at runtime
+  async registerslashes(message) {
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    try {
+      const cmdDefs = Object.keys(commandHandlers).map(name => ({
+        name: name.toLowerCase().slice(0,32),
+        description: `Run ${name} (prefix: !${name})`,
+        options: [ { name: 'text', type: 3, description: 'Arguments as a single string', required: false } ]
+      }));
+
+      if (process.env.SLASH_GUILD_ID) {
+        const targetGuild = client.guilds.cache.get(process.env.SLASH_GUILD_ID);
+        if (targetGuild) await targetGuild.commands.set(cmdDefs);
+      } else if (client.application) {
+        await client.application.commands.set(cmdDefs);
+      }
+
+      await message.reply(`Registered ${cmdDefs.length} slash commands`);
+    } catch (e) {
+      console.error('registerslashes failed', e);
+      return message.reply('Failed to register slash commands: '+String(e));
+    }
+  },
+
   async workoutplan(message, args) {
     const type = args[0]?.toLowerCase() || "general";
     
     const workouts = {
-      push: "**PUSH DAY**\n• Push-ups: 3x10-15\n• Pike push-ups: 3x8-12\n• Tricep dips: 3x10-15\n• Plank: 3x30-60s",
-      pull: "**PULL DAY**\n• Pull-ups/Chin-ups: 3x5-10\n• Inverted rows: 3x8-12\n• Superman: 3x15\n• Dead hang: 3x20-30s",
-      legs: "**LEG DAY**\n• Squats: 3x15-20\n• Lunges: 3x10 each leg\n• Calf raises: 3x20\n• Wall sit: 3x30-45s",
-      general: "**FULL BODY**\n• Squats: 3x15\n• Push-ups: 3x10\n• Plank: 3x30s\n• Jumping jacks: 3x20"
+      push: "**PUSH DAY**\nΓÇó Push-ups: 3x10-15\nΓÇó Pike push-ups: 3x8-12\nΓÇó Tricep dips: 3x10-15\nΓÇó Plank: 3x30-60s",
+      pull: "**PULL DAY**\nΓÇó Pull-ups/Chin-ups: 3x5-10\nΓÇó Inverted rows: 3x8-12\nΓÇó Superman: 3x15\nΓÇó Dead hang: 3x20-30s",
+      legs: "**LEG DAY**\nΓÇó Squats: 3x15-20\nΓÇó Lunges: 3x10 each leg\nΓÇó Calf raises: 3x20\nΓÇó Wall sit: 3x30-45s",
+      general: "**FULL BODY**\nΓÇó Squats: 3x15\nΓÇó Push-ups: 3x10\nΓÇó Plank: 3x30s\nΓÇó Jumping jacks: 3x20"
     };
 
     const workout = workouts[type] || workouts.general;
-    return message.reply(`🏋️‍♂️ **Your Workout Plan:**\n\n${workout}\n\n*Rest 60-90 seconds between sets*`);
+    return message.reply(`≡ƒÅï∩╕ÅΓÇìΓÖé∩╕Å **Your Workout Plan:**\n\n${workout}\n\n*Rest 60-90 seconds between sets*`);
   },
 
   async partner(message, args) {
@@ -1053,11 +1250,11 @@ async function sendCheckInReminder() {
       let message;
       
       if (hour < 12) {
-        message = "🌅 **MORNING CHECK-IN**\nDid you work out this morning? Reply with `!track yes` or `!track no`";
+        message = "≡ƒîà **MORNING CHECK-IN**\nDid you work out this morning? Reply with `!track yes` or `!track no`";
       } else if (hour < 17) {
-        message = "☀️ **AFTERNOON CHECK-IN**\nHave you worked out today? Reply with `!track yes` or `!track no`";
+        message = "ΓÿÇ∩╕Å **AFTERNOON CHECK-IN**\nHave you worked out today? Reply with `!track yes` or `!track no`";
       } else {
-        message = "🌙 **EVENING CHECK-IN**\nDid you get your workout in today? Reply with `!track yes` or `!track no`";
+        message = "≡ƒîÖ **EVENING CHECK-IN**\nDid you get your workout in today? Reply with `!track yes` or `!track no`";
       }
       
       // Get users who haven't tracked today
@@ -1108,7 +1305,7 @@ async function checkMutedUsers() {
           
           const accountabilityChannel = guild.channels.cache.find(ch => ch.name === 'accountability-lounge');
           if (accountabilityChannel) {
-            await accountabilityChannel.send(`🚨 **ACCOUNTABILITY ALERT** 🚨\n<@${userId}> has muted check-ins for over two weeks! They might need some motivation and support from the community. Let's check in on them!`);
+            await accountabilityChannel.send(`≡ƒÜ¿ **ACCOUNTABILITY ALERT** ≡ƒÜ¿\n<@${userId}> has muted check-ins for over two weeks! They might need some motivation and support from the community. Let's check in on them!`);
           }
         }
       }
@@ -1149,7 +1346,7 @@ async function postHealthContent() {
     for (const guild of client.guilds.cache.values()) {
       const healthChannel = guild.channels.cache.find(ch => ch.name === 'health');
       if (healthChannel) {
-        await healthChannel.send(`🌿 **HEALTH INSIGHT** 🌿\n\n${content}`);
+        await healthChannel.send(`≡ƒî┐ **HEALTH INSIGHT** ≡ƒî┐\n\n${content}`);
       }
     }
   } catch (error) {
@@ -1188,7 +1385,7 @@ async function postWealthTip() {
     for (const guild of client.guilds.cache.values()) {
       const wealthChannel = guild.channels.cache.find(ch => ch.name === 'wealth');
       if (wealthChannel) {
-        await wealthChannel.send(`💰 **WEALTH BUILDER TIP** 💰\n\n${content}`);
+        await wealthChannel.send(`≡ƒÆ░ **WEALTH BUILDER TIP** ≡ƒÆ░\n\n${content}`);
       }
     }
   } catch (error) {
@@ -1230,7 +1427,7 @@ async function postFitnessContent() {
     
     const fitnessTips = await getOpenAIResponse(tipsPrompt);
     
-    const message = `💪 **FITNESS FOCUS: ${randomTopic.toUpperCase()}** 💪\n\n${fitnessTips}\n\n📺 **RECOMMENDED WATCH:**\n${videoRecommendation}`;
+    const message = `≡ƒÆ¬ **FITNESS FOCUS: ${randomTopic.toUpperCase()}** ≡ƒÆ¬\n\n${fitnessTips}\n\n≡ƒô║ **RECOMMENDED WATCH:**\n${videoRecommendation}`;
     
     for (const guild of client.guilds.cache.values()) {
       const fitnessChannel = guild.channels.cache.find(ch => ch.name === 'fitness');
@@ -1247,10 +1444,10 @@ async function postFitnessContent() {
 cron.schedule('0 9 * * *', async () => {
   try {
     const quotes = [
-      "💪 Rise and grind! Today's your day to be better than yesterday.",
-      "🔥 The only bad workout is the one that didn't happen. Make it count!",
-      "⚡ Your body can stand almost anything. It's your mind you have to convince.",
-      "🏆 Success isn't given. It's earned in the gym and through discipline."
+      "≡ƒÆ¬ Rise and grind! Today's your day to be better than yesterday.",
+      "≡ƒöÑ The only bad workout is the one that didn't happen. Make it count!",
+      "ΓÜí Your body can stand almost anything. It's your mind you have to convince.",
+      "≡ƒÅå Success isn't given. It's earned in the gym and through discipline."
     ];
     
     const quote = quotes[Math.floor(Math.random() * quotes.length)];
@@ -1322,8 +1519,85 @@ client.once('ready', async () => {
       try { adminLog(guild, `Pinned admin docs and logging docs during startup.`); } catch(e){}
     } catch (e) { console.error('Error pinning docs for guild', guild.id, e); }
   }
+  
+  // --- Slash command registration: create a simple slash command per prefix command ---
+  try {
+    const cmdDefs = Object.keys(commandHandlers).map(name => ({
+      name: name.toLowerCase().slice(0,32),
+      description: `Run ${name} (prefix: !${name})`,
+      options: [ { name: 'text', type: 3, description: 'Arguments as a single string', required: false } ]
+    }));
+
+    if (process.env.SLASH_GUILD_ID) {
+      const targetGuild = client.guilds.cache.get(process.env.SLASH_GUILD_ID);
+      if (targetGuild) await targetGuild.commands.set(cmdDefs);
+    } else if (client.application) {
+      await client.application.commands.set(cmdDefs);
+    }
+
+    console.log(`Registered ${cmdDefs.length} slash commands`);
+  } catch (e) { console.error('Slash command registration failed:', e); }
 });
 client.on('error', console.error);
+
+// Reaction handler: challenge join via 💪
+client.on('messageReactionAdd', async (reaction, user) => {
+  try {
+    if (user.bot) return;
+    if (reaction.partial) {
+      try { await reaction.fetch(); } catch (e) { return; }
+    }
+    const msg = reaction.message;
+    if (!msg) return;
+    // If the message contains a challenge identifier (simple heuristic)
+    if (reaction.emoji && reaction.emoji.name === '💪') {
+      // find challenge by message id or channel context
+      const chId = msg.channel.id;
+      // naive: add user to a challenge list in memory keyed by message id
+      if (!challenges[msg.id]) challenges[msg.id] = { name: msg.content?.slice(0,60) || 'challenge', members: [] };
+      if (!challenges[msg.id].members.includes(user.id)) {
+        challenges[msg.id].members.push(user.id);
+        try { await msg.channel.send(`<@${user.id}> joined the challenge: ${challenges[msg.id].name}`); } catch(e){}
+        // persist if file mapping exists
+        if (saveLoadMap.challenges) saveLoadMap.challenges[0]();
+      }
+    }
+  } catch (e) { console.error('reaction handler error:', e); }
+});
+
+process.on('unhandledRejection', (err) => { console.error('Unhandled Rejection:', err); });
+
+// Map slash command interactions to existing prefix handlers
+client.on('interactionCreate', async (interaction) => {
+  try {
+    if (!interaction.isCommand?.()) return;
+    const name = interaction.commandName;
+    const handler = commandHandlers[name];
+    if (!handler) return interaction.reply({ content: 'Command handler not found for: ' + name, ephemeral: true });
+
+    const text = interaction.options.getString('text') || '';
+    const args = text.trim() ? text.trim().split(/ +/g) : [];
+
+    // Build a minimal message-like object the handlers expect
+    const fakeMessage = {
+      author: interaction.user,
+      member: interaction.member,
+      guild: interaction.guild,
+      channel: interaction.channel,
+      // reply that supports fetchReply so some handlers can edit the reply
+      reply: async (payload) => {
+        const content = typeof payload === 'string' ? payload : (payload.content || JSON.stringify(payload));
+        if (!interaction.replied && !interaction.deferred) return interaction.reply({ content, fetchReply: true });
+        return interaction.followUp({ content, fetchReply: true });
+      }
+    };
+
+    await handler(fakeMessage, args);
+  } catch (e) {
+    console.error('interaction handler error:', e);
+    try { if (!interaction.replied) await interaction.reply({ content: 'Error running command', ephemeral: true }); } catch(e){}
+  }
+});
 
 // ---------------- Start Bot ----------------
 client.login(process.env.DISCORD_TOKEN);
