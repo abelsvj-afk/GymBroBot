@@ -1204,6 +1204,33 @@ const commandHandlers = {
     return message.reply(`Cleared ${period} winner role for this guild.`);
   },
 
+  // Admin: set the birthday announcements channel for this guild
+  async setbirthdaychannel(message, args) {
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    const raw = args.join(' ').trim();
+    if (!raw) return message.reply('Usage: `!setbirthdaychannel <channel-name-or-#mention-or-id>`');
+
+    // resolve by mention/id or channel name
+    const possibleId = raw.replace(/[<#>]/g, '');
+    let channel = message.guild.channels.cache.get(possibleId) || message.guild.channels.cache.find(c => c.name === raw) || message.guild.channels.cache.find(c => c.name === possibleId);
+    if (!channel) return message.reply('Channel not found. Provide a channel mention, id, or exact channel name.');
+
+    // store the configured channel name so announceBirthdays will prefer it
+    try {
+      setGuildConfig(message.guild.id, 'birthdayChannel', channel.name);
+      try { saveGuildConfigs(); } catch(e){}
+      await sendNormalized(message.channel, `Birthday channel set to <#${channel.id}>. Announcements will post there.`);
+      return;
+    } catch (e) {
+      console.error('setbirthdaychannel failed', e);
+      return message.reply('Failed to set birthday channel.');
+    }
+  },
+
   async addhabit(message, args) {
     const habit = args.join(" ").trim();
     if (!habit) return message.reply("Usage: `!addhabit [habit name]`");
