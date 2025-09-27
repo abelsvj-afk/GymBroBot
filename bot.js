@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits, ChannelType } from 'discord.js';
 import OpenAI from 'openai';
 import express from 'express';
+import { MongoClient } from 'mongodb';
 import fs from 'fs';
 import path from 'path';
 import cron from 'node-cron';
@@ -10,6 +11,14 @@ import axios from 'axios';
 import { google } from 'googleapis';
 
 dotenv.config();
+
+// Allow selecting the OpenAI model via environment variable so we can
+// enable newer models (for example: 'gpt-5-mini') without changing code.
+// OPENAI_MODEL is mutable so an admin can change it at runtime via a command.
+let OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+let FALLBACK_OPENAI_MODEL = process.env.FALLBACK_OPENAI_MODEL || 'gpt-3.5-turbo';
+
+console.log(`[OpenAI] Model in use: ${OPENAI_MODEL} (fallback: ${FALLBACK_OPENAI_MODEL})`);
 
 const client = new Client({
   intents: [
@@ -27,6 +36,33 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Optional MongoDB connection (useful for persistent audit logs across restarts)
+let mongoClient = null;
+let mongoDb = null;
+const MONGO_URI = process.env.MONGO_URI || null;
+async function tryConnectMongo() {
+  if (!MONGO_URI) return;
+  try {
+    mongoClient = new MongoClient(MONGO_URI);
+    await mongoClient.connect();
+    mongoDb = mongoClient.db();
+    console.log('[Mongo] Connected to MongoDB');
+  } catch (e) { console.error('[Mongo] Connection failed:', e); mongoClient=null; mongoDb=null; }
+}
+
+// Railway API placeholder: implement only if you set RAILWAY_API_KEY and RAILWAY_PROJECT_ID in env.
+// This function is a safe no-op unless you provide those credentials and uncomment the actual call site.
+async function updateRailwayEnvVar(key, value) {
+  // To implement: call Railway's API to update project/environment variables.
+  // Example flow (NOT active):
+  // 1) Set RAILWAY_API_KEY and RAILWAY_PROJECT_ID in env. The API requires project and environment ids.
+  // 2) Use fetch/axios to call Railway's API endpoints to create/update environment variables for the service.
+  // 3) Return success/failure.
+  // Note: We'll not call this function automatically to avoid accidentally exposing tokens.
+  if (!process.env.RAILWAY_API_KEY) return { ok: false, error: 'no-railway-key' };
+  return { ok: false, error: 'railway-not-implemented' };
+}
 
 // ---------------- Persistent Data ----------------
 const dataDir = './data';
@@ -49,12 +85,14 @@ const files = {
   healthPosts: path.join(dataDir, 'healthPosts.json'),
   wealthTips: path.join(dataDir, 'wealthTips.json'),
   fitnessPosts: path.join(dataDir, 'fitnessPosts.json')
+  , aiHealth: path.join(dataDir, 'ai_health.json')
 };
 
 let memory = {}, birthdays = {}, fitnessWeekly = {}, fitnessMonthly = {};
 let partnerQueue = [], partners = {}, strikes = {}, habitTracker = {};
 let challenges = {}, onboarding = {}, matches = {}, leaderboardPotential = {};
 let checkInMutes = {}, healthPosts = [], wealthTips = [], fitnessPosts = [];
+let aiHealth = [];
 
 // ---------------- Save/Load Helpers ----------------
 const safeWrite = (file, obj) => { try { fs.writeFileSync(file, JSON.stringify(obj, null, 2)); } catch(e){ console.error(`Error saving ${file}:`, e); } };
@@ -76,6 +114,7 @@ const saveLoadMap = {
   healthPosts: [() => safeWrite(files.healthPosts, healthPosts), () => healthPosts = safeRead(files.healthPosts, [])],
   wealthTips: [() => safeWrite(files.wealthTips, wealthTips), () => wealthTips = safeRead(files.wealthTips, [])],
   fitnessPosts: [() => safeWrite(files.fitnessPosts, fitnessPosts), () => fitnessPosts = safeRead(files.fitnessPosts, [])]
+  , aiHealth: [() => safeWrite(files.aiHealth, aiHealth), () => aiHealth = safeRead(files.aiHealth, [])]
 };
 
 function loadAllData() { Object.values(saveLoadMap).forEach(([_, load]) => load()); console.log("All data loaded"); }
@@ -97,18 +136,217 @@ const saveCheckInMutes = () => saveLoadMap.checkInMutes[0]();
 const saveHealthPosts = () => saveLoadMap.healthPosts[0]();
 const saveWealthTips = () => saveLoadMap.wealthTips[0]();
 const saveFitnessPosts = () => saveLoadMap.fitnessPosts[0]();
+const saveAiHealth = () => saveLoadMap.aiHealth[0]();
 
 // ---------------- Express ----------------
 app.use(express.json());
 app.get('/', (req,res)=>res.json({ status:'GymBotBro running', uptime:process.uptime(), guilds:client.guilds.cache.size, users:client.users.cache.size }));
 app.listen(PORT, ()=>console.log(`Express server running on port ${PORT}`));
 
+// ---------------- Admin dashboard (protected) ----------------
+// Simple JSON + HTML view to inspect recent ai_health events.
+// Protect access by setting ADMIN_DASH_SECRET in env and passing it as a query ?secret= or header 'x-admin-secret'.
+app.get('/admin/ai-health', async (req, res) => {
+  const secret = req.query.secret || req.headers['x-admin-secret'];
+  if (!process.env.ADMIN_DASH_SECRET) return res.status(403).send('Admin dashboard not configured (set ADMIN_DASH_SECRET)');
+  if (!secret || secret !== process.env.ADMIN_DASH_SECRET) return res.status(403).send('Forbidden');
+
+  const n = Math.min(200, parseInt(req.query.n) || 50);
+  try {
+    let entries = [];
+    if (mongoDb) {
+      entries = await mongoDb.collection('ai_health').find().sort({ ts: -1 }).limit(n).toArray();
+    } else {
+      // fallback to in-memory / file store
+      entries = aiHealth.slice(-n).reverse();
+    }
+
+    // If the client prefers JSON or requests via curl, return JSON
+    if (req.headers.accept && req.headers.accept.includes('application/json')) {
+      return res.json({ count: entries.length, entries });
+    }
+
+    // Otherwise render a simple HTML table
+    const rows = entries.map(e => `<tr><td>${new Date(e.ts).toLocaleString()}</td><td>${e.type}</td><td>${e.model||''}</td><td>${e.user?`<@${e.user}>` : ''}</td><td>${e.ok===false?`ERROR: ${e.error||''}`:''}</td></tr>`).join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>GymBotBro AI Health</title><style>table{width:100%;border-collapse:collapse}td,th{border:1px solid #ddd;padding:8px}</style></head><body><h2>AI Health (recent ${entries.length})</h2><table><thead><tr><th>When</th><th>Type</th><th>Model</th><th>User</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
+    return res.send(html);
+  } catch (e) {
+    console.error('admin dashboard error:', e);
+    return res.status(500).send('Server error');
+  }
+});
+
 // ---------------- OpenAI Helper ----------------
 async function getOpenAIResponse(prompt){
   try{
-    const completion = await openai.chat.completions.create({ model:"gpt-3.5-turbo", messages:[{role:"user", content:prompt}], max_tokens:300, temperature:0.7 });
+    const completion = await openai.chat.completions.create({ model: OPENAI_MODEL, messages:[{role:"user", content:prompt}], max_tokens:300, temperature:0.7 });
     return completion.choices[0].message.content.trim();
-  } catch(e){ console.error("OpenAI error:",e); return "I can't respond right now."; }
+  } catch(e){
+    console.error("OpenAI error (primary model):", e?.message || e);
+
+    // If the primary model failed, try the fallback model once (useful when a model isn't available for the API key)
+    if (OPENAI_MODEL !== FALLBACK_OPENAI_MODEL) {
+      try {
+        console.log(`[OpenAI] Attempting fallback model: ${FALLBACK_OPENAI_MODEL}`);
+        const completion = await openai.chat.completions.create({ model: FALLBACK_OPENAI_MODEL, messages:[{role:"user", content:prompt}], max_tokens:300, temperature:0.7 });
+        return completion.choices[0].message.content.trim();
+      } catch (err2) {
+        console.error("OpenAI error (fallback):", err2?.message || err2);
+      }
+
+// Admin logging: attempt to post a message to mod/admin/logging channels (if present) and pin it
+async function findAdminChannels(guild) {
+  // Look for a category named 'mod/admin' or role-protected channels named 'mod', 'admin', 'logging'
+  const channels = {};
+  const logging = guild.channels.cache.find(ch => ch.name === 'logging' && (ch.type === ChannelType.GuildText));
+  const mod = guild.channels.cache.find(ch => ch.name === 'mod' && (ch.type === ChannelType.GuildText));
+  const admin = guild.channels.cache.find(ch => ch.name === 'admin' && (ch.type === ChannelType.GuildText));
+  if (logging) channels.logging = logging;
+  if (mod) channels.mod = mod;
+  if (admin) channels.admin = admin;
+  return channels;
+}
+
+async function adminLog(guild, text) {
+  try {
+    const chs = await findAdminChannels(guild);
+    if (chs.logging) {
+      // send as embed when possible
+      try {
+        return await sendLogEmbed(chs.logging, 'GymBotBro Audit', [{ name: 'Info', value: text }]);
+      } catch (e) {
+        return await chs.logging.send(text);
+      }
+    }
+    // fallback to system channel
+    if (guild.systemChannel) return guild.systemChannel.send(text);
+  } catch (e) { console.error('adminLog error:', e); }
+}
+
+// Send a structured embed to a logging channel
+async function sendLogEmbed(channel, title, fields = []) {
+  const embed = new EmbedBuilder()
+    .setTitle(title)
+    .setColor(0x0099ff)
+    .setTimestamp(new Date());
+  fields.forEach(f => embed.addFields({ name: f.name || '\u200B', value: f.value || '\u200B', inline: f.inline || false }));
+  return channel.send({ embeds: [embed] });
+}
+
+// Pin a command document into admin channels if not already present
+async function pinCommandDocs(guild) {
+  try {
+    const chs = await findAdminChannels(guild);
+
+    const adminDoc = `GymBotBro Admin Instructions:\n\n1) Managing AI model\n- Use \`!setmodel <model> [--save] [--force]\` to change models.\n  - Without --force the bot validates model availability.\n  - Use --save to persist to .env in the repo root (Railway will pick ENV var from project settings).\n- Use \`!getmodel\` to view current model and fallback.\n- Use \`!testai\` to run a quick health check (admins only).\n\n2) Deployment notes for Railway:\n- Set environment variables in Railway project settings (OPENAI_API_KEY, OPENAI_MODEL, FALLBACK_OPENAI_MODEL, DISCORD_TOKEN).\n- When you change OPENAI_MODEL via CLI or Railway UI, restart the service to apply unless you use \`!setmodel --save\`.\n\n3) Coordination with myninja AI / GitHub:\n- myninja AI may push code changes to this repo. If you persist changes via \`.env\` and myninja also updates files, ensure you sync changes and don't overwrite .env in CI.\n`;
+
+  const loggingDoc = `GymBotBro Logging Channel – Purpose & Usage:\n\nThis channel is for audit logs only. Do NOT post general instructions here.\nLogs posted here include:\n- Model changes (who changed model, from->to, saved to .env)\n- AI health checks and failures\n- Startup fallback switches\n\nAvailable logging commands (admins):\n- !getmodel -> shows current model & fallback\n- !testai -> runs a quick AI health check (60s cooldown per guild)\n- !setmodel <model> [--save] [--force] -> change primary model\n- !setfallback <model> [--save] -> change fallback model\n\nMongo integration (optional):\n- If you set MONGO_URI in the deployment environment (MongoDB Atlas connection string), audit logs will be recorded to the 'ai_health' collection for long-term storage.\n\nPinned messages here are for logging policy and retention. Only admins should unpin.`;
+
+    // Admin/mod channels: post adminDoc
+    for (const key of ['admin', 'mod']) {
+      const ch = chs[key];
+      if (!ch) continue;
+      const pins = await ch.messages.fetchPinned();
+      const already = pins.find(m => m.content && m.content.startsWith('GymBotBro Admin Instructions'));
+      if (!already) {
+        const sent = await ch.send(adminDoc);
+        await sent.pin();
+      }
+    }
+
+    // Logging channel: post loggingDoc only
+    if (chs.logging) {
+      const ch = chs.logging;
+      const pins = await ch.messages.fetchPinned();
+      const already = pins.find(m => m.content && m.content.startsWith('GymBotBro Logging Channel'));
+      if (!already) {
+        const sent = await ch.send(loggingDoc);
+        await sent.pin();
+      }
+    }
+  } catch (e) { console.error('pinCommandDocs error:', e); }
+}
+
+// Telemetry entry helper
+function recordAiHealthEvent(event) {
+  try {
+    aiHealth.push(Object.assign({ ts: Date.now() }, event));
+    // cap to last 500 entries
+    if (aiHealth.length > 500) aiHealth = aiHealth.slice(-500);
+    saveAiHealth();
+    // also write to Mongo if available
+    if (mongoDb) {
+      try { mongoDb.collection('ai_health').insertOne(Object.assign({ ts: new Date() }, event)); } catch(e){console.error('mongo write failed',e);}    
+    }
+  } catch (e) { console.error('recordAiHealthEvent error:', e); }
+}
+
+// Simple cooldown map for testai command (per-guild)
+const testAiCooldowns = new Map();
+
+// Startup AI health check, attempt to validate primary model; if fails, try fallback and switch
+async function startupAiHealthCheck() {
+  try {
+    const res = await validateModel(OPENAI_MODEL, 5000);
+    if (res.ok) {
+      recordAiHealthEvent({ type: 'startup', result: 'primary_ok', model: OPENAI_MODEL, latency: res.duration });
+      console.log(`[OpenAI] Primary model ${OPENAI_MODEL} reachable (${res.duration}ms)`);
+      return;
+    }
+    console.warn(`[OpenAI] Primary model ${OPENAI_MODEL} failed: ${res.error}. Trying fallback ${FALLBACK_OPENAI_MODEL}`);
+    const res2 = await validateModel(FALLBACK_OPENAI_MODEL, 5000);
+    if (res2.ok) {
+      OPENAI_MODEL = FALLBACK_OPENAI_MODEL;
+      recordAiHealthEvent({ type: 'startup', result: 'switched_to_fallback', from: process.env.OPENAI_MODEL || 'unset', to: OPENAI_MODEL, error: res.error });
+      console.log(`[OpenAI] Switched to fallback model ${OPENAI_MODEL}`);
+    } else {
+      recordAiHealthEvent({ type: 'startup', result: 'both_failed', primaryError: res.error, fallbackError: res2.error });
+      console.error('[OpenAI] Both primary and fallback model checks failed. AI features will return a polite error.');
+    }
+  } catch (e) { console.error('startupAiHealthCheck error:', e); }
+}
+    }
+
+    return "I can't respond right now.";
+  }
+}
+
+// Helper to persist an env var to the .env file in the repo root (simple key=value replacement or append)
+function persistEnvVar(key, value) {
+  try {
+    const envPath = path.resolve(process.cwd(), '.env');
+    let content = '';
+    if (fs.existsSync(envPath)) content = fs.readFileSync(envPath, 'utf8');
+
+    const re = new RegExp('^' + key.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&') + '=.*$', 'm');
+    if (re.test(content)) {
+      content = content.replace(re, `${key}=${value}`);
+    } else {
+      if (content && !content.endsWith('\n')) content += '\n';
+      content += `${key}=${value}\n`;
+    }
+    fs.writeFileSync(envPath, content, 'utf8');
+    return true;
+  } catch (e) {
+    console.error('Failed to persist .env change:', e);
+    return false;
+  }
+}
+
+// Validate a model by doing a tiny, low-cost call. Returns {ok, duration, sample} or {ok:false, error}
+async function validateModel(model, timeoutMs = 5000) {
+  try {
+    const start = Date.now();
+    const result = await Promise.race([
+      openai.chat.completions.create({ model, messages: [{ role: 'user', content: 'Respond with "OK"' }], max_tokens: 3, temperature: 0 }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs))
+    ]);
+    const duration = Date.now() - start;
+    const sample = result?.choices?.[0]?.message?.content?.trim() || '';
+    return { ok: true, duration, sample };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
 }
 
 // ---------------- Thresholds ----------------
@@ -515,6 +753,118 @@ const commandHandlers = {
     
     const quote = quotes[Math.floor(Math.random() * quotes.length)];
     return message.reply(quote);
+  },
+
+  // Admin: change the OpenAI model at runtime. Use --save to persist to .env
+  async setmodel(message, args) {
+    // Only allow in guilds and allow administrators or BOT_OWNER_ID
+    const model = args[0];
+    if (!model) return message.reply('Usage: `!setmodel <model> [--save] [--force]`');
+
+    const saveFlag = args.includes('--save');
+    const forceFlag = args.includes('--force');
+
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    if (!forceFlag) {
+      const reply = await message.reply(`Validating model: ${model} ...`);
+      const res = await validateModel(model);
+      if (!res.ok) {
+        return reply.edit(`Validation failed for model ${model}: ${res.error}. Use --force to override.`);
+      }
+      await reply.edit(`Model ${model} validated ok (latency ${res.duration}ms). Switching now.`);
+    }
+
+    OPENAI_MODEL = model;
+
+    message.reply(`OpenAI model switched to: ${model}`);
+
+    // Telemetry & logging
+    recordAiHealthEvent({ type: 'setmodel', user: message.author.id, model, force: forceFlag, saved: !!saveFlag });
+    try { adminLog(message.guild, `User <@${message.author.id}> set model -> ${model} ${saveFlag ? '(saved to .env)' : ''}`); } catch(e){}
+
+    if (saveFlag) {
+      const ok = persistEnvVar('OPENAI_MODEL', model);
+      if (ok) message.reply('Saved to .env'); else message.reply('Failed to save to .env');
+    }
+  },
+
+  async getmodel(message) {
+    const modelInfo = `Current model: ${OPENAI_MODEL}\nFallback model: ${FALLBACK_OPENAI_MODEL}`;
+    return message.reply(modelInfo);
+  },
+
+  // Admin: set fallback model used when primary fails
+  async setfallback(message, args) {
+    const model = args[0];
+    if (!model) return message.reply('Usage: `!setfallback <model> [--save]`');
+    const saveFlag = args.includes('--save');
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    FALLBACK_OPENAI_MODEL = model;
+    recordAiHealthEvent({ type: 'setfallback', user: message.author.id, model, saved: !!saveFlag });
+    try { adminLog(message.guild, `User <@${message.author.id}> set fallback model -> ${model} ${saveFlag ? '(saved to .env)' : ''}`); } catch(e){}
+
+    message.reply(`Fallback model set to ${model}`);
+    if (saveFlag) {
+      const ok = persistEnvVar('FALLBACK_OPENAI_MODEL', model);
+      if (ok) message.reply('Saved to .env'); else message.reply('Failed to save to .env');
+    }
+  },
+
+  // Admin: fetch recent AI health events
+  async getaihealth(message, args) {
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    const n = Math.min(10, parseInt(args[0]) || 10);
+    let entries = [];
+    if (mongoDb) {
+      try {
+        entries = await mongoDb.collection('ai_health').find().sort({ ts: -1 }).limit(n).toArray();
+      } catch (e) { console.error('mongo read failed', e); }
+    }
+    if (!entries.length) entries = aiHealth.slice(-n).reverse();
+
+    if (!entries.length) return message.reply('No ai health events found.');
+
+    const fields = entries.map(e => ({ name: new Date(e.ts).toLocaleString(), value: `${e.type} • ${e.model||''} • ${e.user?`by <@${e.user}>` : ''} ${e.ok===false?`• ERROR: ${e.error}`:''}` })).slice(0,10);
+    await sendLogEmbed(message.channel, 'AI Health (recent)', fields);
+  },
+
+  // Admin test - run a small test prompt through the current model and show timing/sample
+  async testai(message) {
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    // Cooldown per guild (60s)
+    const guildId = message.guild.id;
+    const last = testAiCooldowns.get(guildId) || 0;
+    if (Date.now() - last < 60 * 1000) return message.reply('Please wait before running another AI check (60s cooldown).');
+    testAiCooldowns.set(guildId, Date.now());
+
+    const reply = await message.reply('Running quick AI health check...');
+    const res = await validateModel(OPENAI_MODEL, 8000);
+    if (!res.ok) {
+      recordAiHealthEvent({ type: 'testai', user: message.author.id, model: OPENAI_MODEL, ok: false, error: res.error });
+      try { adminLog(message.guild, `AI health check failed by <@${message.author.id}>: ${res.error}`); } catch(e){}
+      return reply.edit(`AI check failed: ${res.error}`);
+    }
+
+    recordAiHealthEvent({ type: 'testai', user: message.author.id, model: OPENAI_MODEL, ok: true, latency: res.duration, sample: res.sample });
+    try { adminLog(message.guild, `AI health check OK by <@${message.author.id}>: model ${OPENAI_MODEL} ${res.duration}ms`); } catch(e){}
+    return reply.edit(`AI check OK (model: ${OPENAI_MODEL}, ${res.duration}ms). Sample: ${res.sample}`);
   },
 
   async workoutplan(message, args) {
@@ -955,11 +1305,23 @@ cron.schedule(FITNESS_POST_CRON, postFitnessContent);
 cron.schedule('*/30 * * * *', tryAutoMatch);
 
 // ---------------- Bot Ready ----------------
-client.once('ready', () => {
+client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   client.user.setActivity("!help for commands");
   loadAllData();
   setInterval(() => tryAutoMatch(), 1000 * 30); // every 30s
+
+  // Run startup AI health check and pin admin docs to admin/mod/logging channels
+  await tryConnectMongo();
+  await startupAiHealthCheck();
+
+  for (const guild of client.guilds.cache.values()) {
+    try {
+      await pinCommandDocs(guild);
+      // log that pinning was attempted
+      try { adminLog(guild, `Pinned admin docs and logging docs during startup.`); } catch(e){}
+    } catch (e) { console.error('Error pinning docs for guild', guild.id, e); }
+  }
 });
 client.on('error', console.error);
 

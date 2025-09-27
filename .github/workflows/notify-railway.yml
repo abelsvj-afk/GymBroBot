@@ -1,0 +1,19 @@
+name: Notify Railway env reminder
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Create issue to remind updating Railway env
+      uses: actions/github-script@v6
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const title = 'Reminder: Verify Railway environment variables after this change';
+          const body = `This commit may change behavior affecting environment variables (OpenAI model, fallback, or code paths).\n\nPlease make sure your Railway project has the correct environment variables set: OPENAI_API_KEY, DISCORD_TOKEN, MONGO_URI (optional), OPENAI_MODEL, FALLBACK_OPENAI_MODEL.`;
+          await github.rest.issues.create({ owner: context.repo.owner, repo: context.repo.repo, title, body });
