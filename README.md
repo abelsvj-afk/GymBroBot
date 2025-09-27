@@ -22,9 +22,10 @@ A comprehensive Discord bot for fitness accountability, workout tracking, habit 
 
 ### Channel-Specific Features
 - **Daily Check-ins**: Automated reminders throughout the day
-- **Health Channel**: Daily posts about natural healing and alternative health information
-- **Wealth Channel**: Daily wealth-building tips and strategies
-- **Fitness Channel**: Daily workout tips and video recommendations
+- **Health Channel**: AI-generated daily posts about natural healing and alternative health information
+- **Wealth Channel**: AI-generated daily wealth-building tips and strategies
+- **Fitness Channel**: AI-generated daily workout tips and video recommendations
+- **Faith Channel**: AI-generated Christian faith guidance posts twice daily
 
 ## Commands
 
@@ -110,12 +111,12 @@ For optimal functionality, set up the following channels:
 - `#announcements` - Important bot announcements
 - `#daily-check-ins` - For workout check-in reminders
 - `#tips-and-guides` - Fitness tips and guides
-- `#faith` - Faith-based discussions
+- `#faith` - For AI-generated Christian faith guidance posts
 - `#mens-style` - Style advice
 - `#open-up` - Mental health support
-- `#health` - For health content and discussions
-- `#wealth` - For wealth tips and financial advice
-- `#fitness` - For fitness content and discussions
+- `#health` - For AI-generated health content and discussions
+- `#wealth` - For AI-generated wealth tips and financial advice
+- `#fitness` - For AI-generated fitness content and discussions
 - `#sports` - Sports updates
 - `#leaderboard` - For community rankings
 - `#accountability-lounge` - For community support

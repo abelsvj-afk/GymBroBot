@@ -147,20 +147,30 @@ Resume receiving check-in reminders.
 - Track your consistency and stay accountable
 
 ### #health
-- Receives daily posts about natural healing and alternative health information
+- Receives AI-generated daily posts about natural healing and alternative health information
 - Topics include fasting benefits, dangers of food additives, and natural healing approaches
+- Each post is uniquely generated using OpenAI, ensuring fresh content every time
 - Great source for health knowledge not commonly discussed in mainstream media
 
 ### #wealth
-- Daily wealth-building tips and strategies
+- AI-generated daily wealth-building tips and strategies
 - Learn about real estate, leveraging debt, banking alternatives, and more
-- Practical advice for financial independence
+- Each tip is uniquely crafted for your specific situation and goals
+- Practical advice for financial independence tailored to young men
 
 ### #fitness
-- Three daily posts with workout tips and strategies
+- Three daily AI-generated posts with workout tips and strategies
 - YouTube video recommendations from top fitness channels
 - Content targeted for men in their teens, 20s, and early 30s
 - Topics cover stretching, weight lifting, calisthenics, and athletic performance
+- Each post is uniquely generated to provide fresh, relevant content
+
+### #faith
+- AI-generated faith guidance posts twice daily (8am and 6pm)
+- Christian scripture-based content to boost moral and spiritual awareness
+- Topics include biblical teachings, prayer guidance, and God's presence in daily life
+- Each post is uniquely crafted to provide spiritual encouragement and practical application
+- Complements the YouTube videos posted by Mee6 with personalized faith content
 
 ## Workout Plans
 
