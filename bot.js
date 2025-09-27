@@ -771,8 +771,12 @@ async function checkMutedUsers() {
 // ---------------- Health Posts ----------------
 async function postHealthContent() {
   try {
-    // Health topics to generate content about
-    const healthTopics = [
+    // Load health topics from JSON file
+    const healthTopicsData = safeRead(path.join(dataDir, 'health_topics.json'), { topics: [] });
+    const healthTopics = healthTopicsData.topics.map(topic => topic.title);
+    
+    // If we have topics from JSON, use them; otherwise use hardcoded list
+    const topics = healthTopics.length > 0 ? healthTopics : [
       "benefits of intermittent fasting",
       "dangers of processed food additives",
       "natural anti-inflammatory foods",
@@ -782,17 +786,12 @@ async function postHealthContent() {
       "how artificial sweeteners affect gut health",
       "benefits of organ meats and nose-to-tail eating",
       "how EMF exposure affects sleep quality",
-      "natural alternatives to common medications",
-      "benefits of grounding/earthing",
-      "how industrial seed oils cause inflammation",
-      "benefits of sunlight exposure",
-      "dangers of microplastics in food and water",
-      "how to detox from heavy metals naturally"
+      "natural alternatives to common medications"
     ];
     
-    const randomTopic = healthTopics[Math.floor(Math.random() * healthTopics.length)];
+    const randomTopic = topics[Math.floor(Math.random() * topics.length)];
     
-    const prompt = `You are a health expert who focuses on natural healing, longevity, and health information that's not commonly discussed in mainstream medicine. Write a concise, informative post (max 250 words) about ${randomTopic}. Include scientific backing where possible, but focus on practical advice. Format with markdown headings and bullet points for readability.`;
+    const prompt = `You are a health expert who focuses on natural healing, longevity, and health information that's not commonly discussed in mainstream medicine. Write a unique, informative post (max 250 words) about "${randomTopic}". Include scientific backing where possible, but focus on practical advice. Format with markdown headings and bullet points for readability. Make this response different from any previous posts about this topic.`;
     
     const content = await getOpenAIResponse(prompt);
     
@@ -831,7 +830,7 @@ async function postWealthTip() {
     
     const randomTopic = wealthTopics[Math.floor(Math.random() * wealthTopics.length)];
     
-    const prompt = `You are a wealth-building expert who shares insider financial knowledge that banks and financial institutions don't advertise. Write a concise, practical tip (max 250 words) about ${randomTopic}. Focus on actionable advice for men in their 20s-30s. Format with a clear headline and bullet points for key takeaways.`;
+    const prompt = `You are a wealth-building expert who shares insider financial knowledge that banks and financial institutions don't advertise. Write a unique, practical tip (max 250 words) about "${randomTopic}". Focus on actionable advice for men in their 20s-30s. Format with a clear headline and bullet points for key takeaways. Make this response different from any previous posts about this topic.`;
     
     const content = await getOpenAIResponse(prompt);
     
@@ -871,7 +870,7 @@ async function postFitnessContent() {
     const randomTopic = fitnessTopics[Math.floor(Math.random() * fitnessTopics.length)];
     
     // First, get a YouTube video recommendation
-    const videoPrompt = `You are a fitness expert specializing in men's fitness for those in their teens, 20s and early 30s. Recommend ONE specific YouTube video about "${randomTopic}". Provide ONLY the exact YouTube video title and channel name in this format: "Video Title | Channel Name". Choose videos from popular fitness channels like AthleanX, Jeff Nippard, Jeremy Ethier, Hybrid Calisthenics, or similar quality channels.`;
+    const videoPrompt = `You are a fitness expert specializing in men's fitness for those in their teens, 20s and early 30s. Recommend ONE specific YouTube video about "${randomTopic}". Provide ONLY the exact YouTube video title and channel name in this format: "Video Title | Channel Name". Choose videos from popular fitness channels like AthleanX, Jeff Nippard, Jeremy Ethier, Hybrid Calisthenics, or similar quality channels. Make this recommendation different from previous ones.`;
     
     const videoRecommendation = await getOpenAIResponse(videoPrompt);
     
@@ -890,6 +889,42 @@ async function postFitnessContent() {
     }
   } catch (error) {
     console.error("Error posting fitness content:", error);
+  }
+}
+
+// ---------------- Faith Channel Posts ----------------
+async function postFaithContent() {
+  try {
+    // Load faith prompts from JSON file
+    const faithPromptsData = safeRead(path.join(dataDir, 'faith_prompts.json'), { prompts: [] });
+    const faithPrompts = faithPromptsData.prompts;
+    
+    // If we have prompts from JSON, use them; otherwise use hardcoded list
+    const prompts = faithPrompts.length > 0 ? faithPrompts : [
+      "How Psalm 23 can guide us through difficult times",
+      "Finding strength in Philippians 4:13",
+      "The meaning of grace in everyday life",
+      "How to apply the teachings of the Sermon on the Mount",
+      "Understanding the power of prayer",
+      "The significance of the Armor of God in Ephesians 6",
+      "Finding peace in John 14:27 when facing anxiety",
+      "The importance of forgiveness as taught in Matthew 6:14-15"
+    ];
+    
+    const randomPrompt = prompts[Math.floor(Math.random() * prompts.length)];
+    
+    const faithPrompt = `You are a Christian faith guide and spiritual mentor. Write an inspiring, thoughtful, and encouraging message about "${randomPrompt}". Include relevant scripture, practical application for daily life, and words of encouragement. Keep it conversational, uplifting, and around 250 words. Make this response unique and different from previous posts about this topic. Focus on God's love, presence, and guidance.`;
+    
+    const content = await getOpenAIResponse(faithPrompt);
+    
+    for (const guild of client.guilds.cache.values()) {
+      const faithChannel = guild.channels.cache.find(ch => ch.name === 'faith');
+      if (faithChannel) {
+        await faithChannel.send(`✝️ **FAITH REFLECTION** ✝️\n\n${content}`);
+      }
+    }
+  } catch (error) {
+    console.error("Error posting faith content:", error);
   }
 }
 
@@ -950,6 +985,9 @@ cron.schedule(WEALTH_TIP_CRON, postWealthTip);
 
 // ---------------- Fitness posts ----------------
 cron.schedule(FITNESS_POST_CRON, postFitnessContent);
+
+// ---------------- Faith channel posts (twice daily) ----------------
+cron.schedule('0 8,18 * * *', postFaithContent); // 8am and 6pm
 
 // ---------------- Partner matching (every 30 minutes) ----------------
 cron.schedule('*/30 * * * *', tryAutoMatch);
