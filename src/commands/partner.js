@@ -2,10 +2,10 @@ export default {
   name: 'partner',
   description: 'Find a partner (goal/future)',
   group: 'partners',
-  slash: { type: 'subcommand', options: [{ name: 'type', type: 3, description: 'goal or future', required: true }] },
+  slash: { options: [{ name: 'type', type: 3, description: 'goal or future', required: true }] },
   execute: async (context, message, args) => {
     const type = args[0]?.toLowerCase();
-    if (!type || !['goal','future'].includes(type)) return message.reply('Usage: `/partners partner <goal|future>`');
+    if (!type || !['goal','future'].includes(type)) return message.reply('Usage: `/partner type:goal` or `/partner type:future`');
     const { partnerQueue, matches, onboarding, savePartnerQueue } = context;
     const authorId = message.author.id;
     if (partnerQueue.includes(authorId)) return message.reply("You're already in the matching queue!");

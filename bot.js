@@ -2092,48 +2092,8 @@ client.once('ready', async () => {
     });
   } catch(e) { }
 
-  // --- Slash command registration: register grouped slash commands ---
+  // --- Slash command registration: register slash commands from modules ---
   try {
-    // Define logical groups and their subcommands. Each subcommand can accept a single 'text' string argument.
-    const grouped = [
-      {
-        name: 'fitness',
-        description: 'Fitness-related commands (track, progress, leaderboard, workoutplan)',
-        subcommands: ['track','progress','leaderboard','workoutplan']
-      },
-      {
-        name: 'habits',
-        description: 'Habits management (add, list, check)',
-        subcommands: ['add','habits','check']
-      },
-      {
-        name: 'coach',
-        description: 'Coaching tools (ask, quote)',
-        subcommands: ['coach','quote']
-      },
-      {
-        name: 'partners',
-        description: 'Partner matching (partner, leavequeue)',
-        subcommands: ['partner','leavequeue']
-      },
-      {
-        name: 'admin',
-        description: 'Admin utilities (setmodel, getmodel, setfallback, getaihealth, testai, registerslashes, leader role)',
-        subcommands: ['setmodel','getmodel','setfallback','getaihealth','testai','registerslashes','setleaderrole','clearleaderrole']
-      }
-    ];
-
-    const cmdDefs = grouped.map(g => ({
-      name: g.name.slice(0,32),
-      description: g.description,
-      options: g.subcommands.map(sc => ({
-        name: sc.slice(0,32),
-        type: 1, // 1 = SUB_COMMAND
-        description: `Run ${sc} (prefix: !${sc})`,
-        options: [ { name: 'text', type: 3, description: 'Arguments as a single string', required: false } ]
-      }))
-    }));
-
     // Attempt to auto-sync all module-defined slash commands
     await buildAndSyncSlashCommands();
     console.log('Attempted to synchronize module slash commands at startup');
@@ -2173,22 +2133,26 @@ client.on('interactionCreate', async (interaction) => {
   try {
     if (!interaction.isCommand?.()) return;
 
-    // Support grouped commands: command name is the group (e.g., 'fitness'), subcommand is the actual action (e.g., 'track')
+    // Support slash commands: command name is the handler (e.g., 'partner'), options are args
     const group = interaction.commandName;
     const sub = interaction.options.getSubcommand(false); // returns null if no subcommand
 
-    let handlerName = null;
-    let text = '';
+    let handlerName = group;
+    let args = [];
 
     if (sub) {
-      // If a subcommand exists, use that as the handler name
-      handlerName = sub;
-      text = interaction.options.getString('text') || '';
-    } else {
-      // Backwards compatibility: single-level commands might pass 'text' directly
-      // Try to find a handler that matches the group name
-      handlerName = group;
-      text = interaction.options.getString('text') || '';
+      // For subcommands, subcommand is the action
+      args.push(sub);
+    }
+
+    const text = interaction.options.getString('text') || '';
+    args = args.concat(text.trim() ? text.trim().split(/ +/g) : []);
+
+    // For commands with named options, collect them
+    for (const opt of interaction.options.data || []) {
+      if (opt.name !== 'text' && opt.value !== undefined) {
+        args.push(opt.value);
+      }
     }
 
     const handler = commandHandlers[handlerName];
@@ -2199,8 +2163,6 @@ client.on('interactionCreate', async (interaction) => {
       const allowed = commandChannelLock[handlerName];
       return interaction.reply({ content: 'That command must be used in the `' + allowed + '` channel. Please try there.', ephemeral: true });
     }
-
-    const args = text.trim() ? text.trim().split(/ +/g) : [];
 
     // Build slashOptions map for typed inputs (role/user/channel/id etc.)
     const slashOptions = {};
