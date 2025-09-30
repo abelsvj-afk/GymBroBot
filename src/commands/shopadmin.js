@@ -21,12 +21,20 @@ export default {
         const id = (args[1] || `item-${Date.now()}`).toString();
         const price = parseInt(args[2] || '0', 10) || 0;
         const type = args[3] || 'misc';
-        const name = args.slice(4).join(' ') || `Item ${id}`;
+        // if adding role: usage: !shopadmin add <id> <price> role @role [durationHours] <name...>
+        let nameStartIndex = 4;
         const meta = {};
-        // if type=role, ensure third arg can be roleId or mention
-        if (type === 'role' && message.mentions.roles && message.mentions.roles.first) {
-          const r = message.mentions.roles.first(); if (r) meta.roleId = r.id;
+        if (type === 'role') {
+          const r = message.mentions.roles && message.mentions.roles.first ? message.mentions.roles.first() : null;
+          if (r) meta.roleId = r.id;
+          // optionally parse duration
+          const possibleDuration = args[4];
+          if (possibleDuration && !possibleDuration.startsWith('<@') && !isNaN(parseInt(possibleDuration, 10))) {
+            meta.duration = parseInt(possibleDuration, 10); // hours
+            nameStartIndex = 5;
+          }
         }
+        const name = args.slice(nameStartIndex).join(' ') || `Item ${id}`;
         shop[guildId].push({ id, name, price, type, description: '', meta });
         await storage.save('shop', shop);
         return message.reply(`Added shop item ${id} - ${name} (${price} Coins)`);

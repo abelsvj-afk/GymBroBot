@@ -26,7 +26,18 @@ export default {
       if (item.type === 'role' && message.guild) {
         try {
           const role = message.guild.roles.cache.get(item.meta?.roleId);
-          if (role) await message.member.roles.add(role);
+          if (role) {
+            await message.member.roles.add(role);
+            // If item.meta.duration (in hours) present, record temporary grant
+            if (item.meta && item.meta.duration && Number(item.meta.duration) > 0) {
+              const expiresAt = Date.now() + Number(item.meta.duration) * 3600 * 1000;
+              const grants = await storage.load('tempRoleGrants', {});
+              grants[message.guild.id] = grants[message.guild.id] || {};
+              grants[message.guild.id][message.author.id] = grants[message.guild.id][message.author.id] || [];
+              grants[message.guild.id][message.author.id].push({ roleId: role.id, expiresAt });
+              await storage.save('tempRoleGrants', grants);
+            }
+          }
           message.reply(`✅ You bought **${item.name}** and were granted the role ${role ? role.name : item.meta?.roleId}`);
         } catch (e) {
           console.error('buy role apply error', e);
