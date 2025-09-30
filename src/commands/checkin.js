@@ -33,6 +33,14 @@ export default {
       economy[userId].lastCheckin = today;
       await storage.save('economy', economy);
 
+      // Award achievements for streak milestones (if bot helper available)
+      try {
+        if (context && context.awardAchievement) {
+          if ((economy[userId].streak || 0) === 7) await context.awardAchievement(message.guild, userId, 'hydrated');
+          if ((economy[userId].streak || 0) === 30) await context.awardAchievement(message.guild, userId, 'iron_champion');
+        }
+      } catch (e) { console.error('achievement award failed', e); }
+
       // Check for streak milestone roles configuration per guild and award roles if configured
       try {
         if (message.guild) {

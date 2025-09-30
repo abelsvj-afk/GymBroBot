@@ -67,6 +67,9 @@ let checkInMutes = {}, healthPosts = [], wealthTips = [], fitnessPosts = [];
 let aiHealth = [];
 let commandDocsPins = [];
 let lastHealthAlert = {};
+// New: message counts and achievements store
+let messageCounts = {};
+let achievementsStore = {}; // { userId: [achId,...] } - persisted under 'achievements'
 
 // ---------------- Save/Load Helpers ----------------
 // Storage-backed load/save helpers
@@ -90,6 +93,8 @@ async function loadAllData() {
   fitnessPosts = await storage.load('fitnessPosts', []);
   aiHealth = await storage.load('ai_health', []);
   lastHealthAlert = await storage.load('lastHealthAlert', {});
+  messageCounts = await storage.load('messageCounts', {});
+  achievementsStore = await storage.load('achievements', {});
   console.log('All data loaded (storage)');
 }
 
@@ -123,6 +128,8 @@ const saveHealthPosts = async () => storage.save('healthPosts', healthPosts);
 const saveWealthTips = async () => storage.save('wealthTips', wealthTips);
 const saveFitnessPosts = async () => storage.save('fitnessPosts', fitnessPosts);
 const saveAiHealth = async () => storage.save('ai_health', aiHealth);
+const saveMessageCounts = async () => storage.save('messageCounts', messageCounts);
+const saveAchievements = async () => storage.save('achievements', achievementsStore);
 
 // ----- Additional explicit file handles and helpers requested -----
 // Provide the file path constants the user referenced and small save/load helpers
@@ -207,14 +214,20 @@ async function getOpenAIResponse(prompt){
 
 // Admin logging: attempt to post a message to mod/admin/logging channels (if present) and pin it
 async function findAdminChannels(guild) {
-  // Look for a category named 'mod/admin' or role-protected channels named 'mod', 'admin', 'logging'
+  // Flexible admin/mod/logging channel discovery: prefer exact matches, then contains, then systemChannel
   const channels = {};
-  const logging = guild.channels.cache.find(ch => ch.name === 'logging' && (ch.type === ChannelType.GuildText));
-  const mod = guild.channels.cache.find(ch => ch.name === 'mod' && (ch.type === ChannelType.GuildText));
-  const admin = guild.channels.cache.find(ch => ch.name === 'admin' && (ch.type === ChannelType.GuildText));
-  if (logging) channels.logging = logging;
-  if (mod) channels.mod = mod;
-  if (admin) channels.admin = admin;
+  const lc = s => (s || '').toLowerCase();
+  const byExact = name => guild.channels.cache.find(ch => lc(ch.name) === name && ch.type === ChannelType.GuildText);
+  const byContains = name => guild.channels.cache.find(ch => lc(ch.name).includes(name) && ch.type === ChannelType.GuildText);
+
+  channels.logging = byExact('logging') || byExact('log') || byContains('log') || null;
+  channels.admin = byExact('admin') || byContains('admin') || byContains('staff') || null;
+  channels.mod = byExact('mod') || byExact('moderator') || byContains('mod') || null;
+
+  if (!channels.logging && guild.systemChannel) channels.logging = guild.systemChannel;
+  if (!channels.admin && guild.systemChannel) channels.admin = guild.systemChannel;
+  if (!channels.mod && guild.systemChannel) channels.mod = guild.systemChannel;
+
   return channels;
 }
 
@@ -290,6 +303,37 @@ function recordAiHealthEvent(event) {
       try { mongoDb.collection('ai_health').insertOne(Object.assign({ ts: new Date() }, event)); } catch(e){console.error('mongo write failed',e);}    
     }
   } catch (e) { console.error('recordAiHealthEvent error:', e); }
+}
+
+// Achievements metadata
+const ACHIEVEMENTS = {
+  hydrated: { id: 'hydrated', name: 'Hydrated', desc: 'Checked in 7 days in a row' },
+  beast_mode: { id: 'beast_mode', name: 'Beast Mode', desc: 'Sent 1,000 messages' },
+  night_lifter: { id: 'night_lifter', name: 'Night Lifter', desc: 'Active after 2AM' },
+  iron_champion: { id: 'iron_champion', name: 'Iron Champion', desc: 'Rank #1 on the leaderboard' }
+};
+
+// Award an achievement to a user (idempotent)
+async function awardAchievement(guild, userId, achId) {
+  try {
+    achievementsStore[userId] = achievementsStore[userId] || [];
+    if (achievementsStore[userId].includes(achId)) return false;
+    achievementsStore[userId].push(achId);
+    await saveAchievements();
+    // notify the user in DMs when possible, or post in guild if provided
+    try {
+      const user = await client.users.fetch(userId).catch(()=>null);
+      const meta = ACHIEVEMENTS[achId] || { id:achId, name:achId };
+      const text = `🏆 Achievement unlocked: **${meta.name}** — ${meta.desc || ''}`;
+      if (user) {
+        await user.send(text).catch(()=>{});
+      }
+      if (guild) {
+        try { const ch = guild.systemChannel || guild.channels.cache.find(c=> (c.name||'').toLowerCase().includes('general')); if(ch) ch.send(`${user ? `<@${userId}>` : ''} unlocked **${meta.name}**`).catch(()=>{}); } catch(e){}
+      }
+    } catch (e) { console.error('notify achievement failed', e); }
+    return true;
+  } catch (e) { console.error('awardAchievement error', e); return false; }
 }
 
 // Simple cooldown map for testai command (per-guild)
@@ -1049,7 +1093,7 @@ const commandHandlers = {
         { name: 'habits', description: 'Habits management', subcommands: ['add','habits','check'] },
         { name: 'coach', description: 'Coaching tools', subcommands: ['coach','quote'] },
         { name: 'partners', description: 'Partner matching', subcommands: ['partner','leavequeue'] },
-        { name: 'admin', description: 'Admin utilities', subcommands: ['setmodel','getmodel','setfallback','getaihealth','testai','registerslashes'] }
+  { name: 'admin', description: 'Admin utilities', subcommands: ['setmodel','getmodel','setfallback','getaihealth','testai','registerslashes','pindocs','listcommands'] }
       ];
 
       const cmdDefs = grouped.map(g => ({
@@ -1070,6 +1114,29 @@ const commandHandlers = {
       console.error('registerslashes failed', e);
       return message.reply('Failed to register slash commands: '+String(e));
     }
+  },
+
+  // Admin: force pin admin & logging docs
+  async pindocs(message) {
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    await pinCommandDocs(message.guild);
+    return message.reply('Pinned admin/logging docs (if channels found).');
+  },
+
+  // Admin: list commands and channel locks
+  async listcommands(message) {
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    const lines = Object.keys(commandHandlers).map(n => `• ${n} — ${commandChannelLock[n] || 'any'}`).sort();
+    const embed = new EmbedBuilder().setTitle('Commands & Channel Locks').setDescription(lines.join('\n')).setColor(0x3498DB);
+    return message.reply({ embeds: [embed] });
   },
 
   async workoutplan(message, args) {
@@ -1214,11 +1281,13 @@ async function loadCommandModules() {
       try {
         const modPath = path.join(dir, f);
         const imported = await import(modPath);
-        const def = imported.default;
-        if (def && def.name && typeof def.execute === 'function') {
+          const def = imported.default;
+          if (def && def.name && typeof def.execute === 'function') {
           // wrap module's execute to match existing handler signature
           commandHandlers[def.name] = async (message, args) => {
-            const context = { client, EmbedBuilder, PermissionFlagsBits, ChannelType, getOpenAIResponse, validateModel, adminLog, storage, saveHabits, savePartnerQueue, savePartners, saveMatches, saveStrikes, saveChallenges, saveWeekly, saveMonthly, saveMemory, habitTracker, fitnessWeekly, partnerQueue, matches, onboarding, startOnboarding };
+            const context = { client, EmbedBuilder, PermissionFlagsBits, ChannelType, getOpenAIResponse, validateModel, adminLog, storage, saveHabits, savePartnerQueue, savePartners, saveMatches, saveStrikes, saveChallenges, saveWeekly, saveMonthly, saveMemory, habitTracker, fitnessWeekly, partnerQueue, matches, onboarding, startOnboarding,
+              // achievements & message counters
+              awardAchievement, messageCounts, achievementsStore, saveAchievements, saveMessageCounts };
             await def.execute(context, message, args);
           };
 
@@ -1281,6 +1350,23 @@ client.on("messageCreate", async (message) => {
   }
   saveMemory();
 
+  // Track message counts for achievements
+  try {
+    messageCounts[message.author.id] = (messageCounts[message.author.id] || 0) + 1;
+    if (messageCounts[message.author.id] === 1000) {
+      // award Beast Mode
+      await awardAchievement(message.guild, message.author.id, ACHIEVEMENTS.beast_mode.id);
+    }
+    // Night Lifter: if message sent after 2AM local time
+    const zone = process.env.TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const hour = new Date().toLocaleString('en-US', { timeZone: zone });
+    const h = new Date(hour).getHours();
+    if (h >= 2 && h < 5) {
+      await awardAchievement(message.guild, message.author.id, ACHIEVEMENTS.night_lifter.id);
+    }
+    await saveMessageCounts();
+  } catch (e) { console.error('message count/achievement error', e); }
+
   // Partner channel tracking
   if (partners[message.channel.id]) {
     const rec = partners[message.channel.id];
@@ -1305,14 +1391,18 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  // AI responses (15% chance)
+  // AI responses (15% chance) using channel-aware persona prompts
   if (!message.content.startsWith("!") && Math.random() < 0.15) {
     try {
-      const prompt = `You are GymBotBro, a fitness mentor. Respond to: "${message.content}" in 1-2 sentences. Be motivational and practical.`;
-      const response = await getOpenAIResponse(prompt);
-      await message.reply(response);
+      const personaPrompt = await getChannelPersona(message.channel, message.content);
+      const reply = await getOpenAIResponse(personaPrompt);
+      await message.reply({ embeds: [
+        new EmbedBuilder()
+          .setDescription(reply)
+          .setColor(0x3498db)
+      ]});
     } catch (e) {
-      console.error("AI response error:", e);
+      console.error("AI reply error:", e);
     }
   }
 
@@ -1607,8 +1697,93 @@ cron.schedule(WEALTH_TIP_CRON, postWealthTip);
 // ---------------- Fitness posts ----------------
 cron.schedule(FITNESS_POST_CRON, postFitnessContent);
 
-// ---------------- Partner matching (every 30 minutes) ----------------
-cron.schedule('*/30 * * * *', tryAutoMatch);
+// ---------------- Daily motivation (9 AM) ----------------
+// run auto-match every minute for quicker pairing
+setInterval(() => {
+  tryAutoMatch();
+} , 60 * 1000);
+
+// ---------------- CRON JOBS ----------------
+// Health posts (twice daily)
+cron.schedule(HEALTH_POST_CRON, async () => {
+  const ch = client.channels.cache.find(c => (c.name || '').toLowerCase().includes('health'));
+  if (ch) {
+    const news = await getHealthNews();
+    await ch.send({ embeds: [
+      new EmbedBuilder()
+        .setTitle("🩺 Health Tip")
+        .setDescription(news)
+        .setColor(0x2ecc71)
+        .setTimestamp()
+    ]});
+  }
+});
+
+// Wealth tips (twice daily)
+cron.schedule(WEALTH_TIP_CRON, async () => {
+  const ch = client.channels.cache.find(c => (c.name || '').toLowerCase().includes('wealth'));
+  if (ch) {
+    const tips = wealthTips.length ? wealthTips[Math.floor(Math.random() * wealthTips.length)] : "Save 10% before you spend 💰";
+    await ch.send({ embeds: [
+      new EmbedBuilder()
+        .setTitle("💰 Wealth Tip")
+        .setDescription(tips)
+        .setColor(0xf1c40f)
+        .setTimestamp()
+    ]});
+  }
+});
+
+// Fitness posts (3x daily)
+cron.schedule(FITNESS_POST_CRON, async () => {
+  const ch = client.channels.cache.find(c => (c.name || '').toLowerCase().includes('fitness'));
+  if (ch) {
+    const videos = await getRandomFitnessVideos(1);
+    await ch.send({ embeds: [
+      new EmbedBuilder()
+        .setTitle("🏋️ Fitness Motivation")
+        .setDescription(videos[0])
+        .setColor(0xe74c3c)
+        .setTimestamp()
+    ]});
+  }
+});
+
+// Role expiry processor: run every 10 minutes and clear temporary role grants
+cron.schedule('*/10 * * * *', async () => {
+  try {
+    const grants = await storage.load('tempRoleGrants', {}); // { guildId: { userId: [{ roleId, expiresAt }] } }
+    let changed = false;
+    for (const guildId of Object.keys(grants || {})) {
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) continue;
+      for (const userId of Object.keys(grants[guildId] || {})) {
+        const entries = grants[guildId][userId];
+        const remain = [];
+        for (const e of entries) {
+          if (Date.now() > e.expiresAt) {
+            // revoke role
+            try {
+              const member = await guild.members.fetch(userId).catch(()=>null);
+              if (member) {
+                const role = guild.roles.cache.get(e.roleId);
+                if (role && guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+                  await member.roles.remove(role).catch(()=>{});
+                }
+              }
+            } catch (err) { console.error('revoke role error', err); }
+            changed = true;
+          } else {
+            remain.push(e);
+          }
+        }
+        if (remain.length) grants[guildId][userId] = remain; else delete grants[guildId][userId];
+      }
+      if (Object.keys(grants[guildId] || {}).length === 0) delete grants[guildId];
+    }
+    if (changed) await storage.save('tempRoleGrants', grants);
+  } catch (e) { console.error('temp role expiry cron failed', e); }
+});
 
 // ---------------- Bot Ready ----------------
 client.once('ready', async () => {
