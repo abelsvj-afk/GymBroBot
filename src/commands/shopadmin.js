@@ -1,0 +1,52 @@
+export default {
+  name: 'shopadmin',
+  group: 'economy',
+  slash: { group: 'economy', options: [] },
+  async execute(context, message, args) {
+    try {
+      // admin-only operations: add/remove/list
+      const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+      const isAdmin = member ? member.permissions.has(context.PermissionFlagsBits?.Administrator || 0) : false;
+      const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+      if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or bot owner to manage shop items.');
+
+      const op = args[0]?.toLowerCase();
+      const storage = context.storage;
+      const guildId = message.guild ? message.guild.id : 'global';
+
+      const shop = await storage.load('shop', {});
+      shop[guildId] = shop[guildId] || [];
+
+      if (op === 'add') {
+        const id = (args[1] || `item-${Date.now()}`).toString();
+        const price = parseInt(args[2] || '0', 10) || 0;
+        const type = args[3] || 'misc';
+        const name = args.slice(4).join(' ') || `Item ${id}`;
+        const meta = {};
+        // if type=role, ensure third arg can be roleId or mention
+        if (type === 'role' && message.mentions.roles && message.mentions.roles.first) {
+          const r = message.mentions.roles.first(); if (r) meta.roleId = r.id;
+        }
+        shop[guildId].push({ id, name, price, type, description: '', meta });
+        await storage.save('shop', shop);
+        return message.reply(`Added shop item ${id} - ${name} (${price} Coins)`);
+      } else if (op === 'list') {
+        const items = shop[guildId] || [];
+        if (!items.length) return message.reply('No items in shop.');
+        const lines = items.map(it => `• ${it.id} — ${it.name} — ${it.price} Coins — ${it.type}`);
+        return message.reply(lines.join('\n'));
+      } else if (op === 'remove') {
+        const id = args[1];
+        if (!id) return message.reply('Usage: !shopadmin remove <id>');
+        shop[guildId] = (shop[guildId] || []).filter(i => String(i.id) !== String(id));
+        await storage.save('shop', shop);
+        return message.reply(`Removed ${id}`);
+      }
+
+      return message.reply('Usage: !shopadmin add <id> <price> <type> <name...> | !shopadmin remove <id> | !shopadmin list');
+    } catch (e) {
+      console.error('shopadmin error', e);
+      return message.reply('Error in shopadmin.');
+    }
+  }
+};

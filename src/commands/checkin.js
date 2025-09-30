@@ -33,6 +33,38 @@ export default {
       economy[userId].lastCheckin = today;
       await storage.save('economy', economy);
 
+      // Check for streak milestone roles configuration per guild and award roles if configured
+      try {
+        if (message.guild) {
+          const guildId = message.guild.id;
+          const streakRoles = await storage.load('streakRoles', {}); // { [guildId]: { '7': roleId, '30': roleId } }
+          const rolesForGuild = streakRoles[guildId] || {};
+          const grantIf = (days, roleId) => {
+            if (!roleId) return false;
+            if (economy[userId].streak === days) return true;
+            return false;
+          };
+
+          for (const [daysStr, roleId] of Object.entries(rolesForGuild)) {
+            const days = parseInt(daysStr, 10);
+            if (grantIf(days, roleId)) {
+              try {
+                const role = message.guild.roles.cache.get(roleId) || null;
+                if (role && message.guild.members.me.permissions.has('ManageRoles')) {
+                  await message.member.roles.add(role);
+                  // notify user
+                  await message.reply(`🎉 Milestone! You reached a ${days}-day streak and were awarded the role **${role.name}**.`);
+                } else if (role) {
+                  await message.reply(`🎉 Milestone reached (${days} days)! An admin needs to grant the role **${role.name}** because I lack Manage Roles permission.`);
+                }
+              } catch (e) {
+                console.error('Failed to grant streak role', e);
+              }
+            }
+          }
+        }
+      } catch (e) { console.error('streak role check failed', e); }
+
       return message.reply(`💪 You checked in for your workout today!\n🏆 Streak: **${economy[userId].streak} days**\n💰 Earned: **${totalReward} GymCoins** (Base ${baseReward} + Streak Bonus ${streakBonus})\nTotal: ${economy[userId].balance}`);
     } catch (e) {
       console.error('checkin error', e);
