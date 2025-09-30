@@ -41,6 +41,31 @@ async function runHealthCheck(context, guild) {
     results.push({ key: 'storage', name: 'Storage', ok: !!ping.ok, note: ping.error || 'Filesystem or Mongo reachable' });
   } catch (e) { results.push({ key: 'storage', name: 'Storage', ok: false, note: String(e) }); }
 
+  // Node engine compatibility (check package.json engines)
+  try {
+    const pkg = JSON.parse(require('fs').readFileSync(require('path').join(process.cwd(),'package.json'),'utf8'));
+    const engine = pkg.engines && pkg.engines.node;
+    const nodeOk = !engine || (engine && process.version && process.version.startsWith(engine.replace('x','')));
+    results.push({ key: 'node', name: 'Node Engine', ok: !!nodeOk, note: engine ? `Required: ${engine}, Running: ${process.version}` : 'No engine specified' });
+  } catch (e) { results.push({ key: 'node', name: 'Node Engine', ok: false, note: String(e) }); }
+
+  // package.json deps sanity (installed node_modules presence)
+  try {
+    const fs = require('fs');
+    const pkg = JSON.parse(fs.readFileSync(require('path').join(process.cwd(),'package.json'),'utf8'));
+    const deps = Object.keys(pkg.dependencies||{});
+    const missing = [];
+    for (const d of deps) { if (!fs.existsSync(require('path').join(process.cwd(),'node_modules',d))) missing.push(d); }
+    results.push({ key: 'deps', name: 'Dependencies', ok: missing.length===0, note: missing.length ? 'Missing: '+missing.slice(0,5).join(', ') : 'All deps installed' });
+  } catch (e) { results.push({ key: 'deps', name: 'Dependencies', ok: false, note: String(e) }); }
+
+  // Disk space check (simple - free bytes on cwd drive)
+  try {
+    const os = require('os');
+    const diskFree = os.freemem(); // approximate using free memory as proxy (Windows limitation)
+    results.push({ key: 'disk', name: 'Free Memory (proxy)', ok: diskFree > 50 * 1024 * 1024, note: `${Math.round(diskFree/1024/1024)} MB free` });
+  } catch (e) { results.push({ key: 'disk', name: 'Disk/Memory', ok: false, note: String(e) }); }
+
   // OpenAI model validation
   try {
     const res = await validateModel(process.env.OPENAI_MODEL || 'gpt-3.5-turbo', 5000);

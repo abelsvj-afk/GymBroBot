@@ -20,7 +20,8 @@
     "googleapis": "^160.0.0",
     "newsapi": "^2.4.1",
     "node-cron": "^3.0.3",
-  "luxon": "^3.4.0",
+  "@napi-rs/canvas": "^0.1.32",
+    "luxon": "^3.4.0",
     "openai": "^4.104.0",
     "mongodb": "^5.6.0"
   }

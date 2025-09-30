@@ -9,6 +9,7 @@ import { runHealthCheck } from './src/commands/health.js';
 import { DateTime } from 'luxon';
 import fs from 'fs';
 import path from 'path';
+import { pathToFileURL } from 'url';
 import cron from 'node-cron';
 import axios from 'axios';
 import { google } from 'googleapis';
@@ -70,6 +71,9 @@ let lastHealthAlert = {};
 // New: message counts and achievements store
 let messageCounts = {};
 let achievementsStore = {}; // { userId: [achId,...] } - persisted under 'achievements'
+let leaderRoles = {}; // { guildId: roleId }
+let currentChampion = {}; // { guildId: userId }
+let modulesMeta = []; // collected module metadata for slash sync
 
 // ---------------- Save/Load Helpers ----------------
 // Storage-backed load/save helpers
@@ -95,7 +99,20 @@ async function loadAllData() {
   lastHealthAlert = await storage.load('lastHealthAlert', {});
   messageCounts = await storage.load('messageCounts', {});
   achievementsStore = await storage.load('achievements', {});
+  leaderRoles = await storage.load('leaderRoles', {});
+  currentChampion = await storage.load('currentChampion', {});
   console.log('All data loaded (storage)');
+  await normalizeLoadedData();
+}
+
+// Ensure we coerce certain loaded shapes to expected types (robust against file format drift)
+async function normalizeLoadedData() {
+  if (!Array.isArray(partnerQueue)) partnerQueue = [];
+  if (!Array.isArray(healthPosts)) healthPosts = [];
+  if (!Array.isArray(wealthTips)) wealthTips = [];
+  if (!Array.isArray(fitnessPosts)) fitnessPosts = [];
+  if (!messageCounts || typeof messageCounts !== 'object') messageCounts = {};
+  if (!achievementsStore || typeof achievementsStore !== 'object') achievementsStore = {};
 }
 
 async function saveAllData() {
@@ -113,7 +130,11 @@ const saveCommandDocsPins = async () => storage.save('commandDocsPins', commandD
 
 // Shorthand async save functions
 const saveMemory = async () => storage.save('memory', memory);
-const saveWeekly = async () => storage.save('weekly', fitnessWeekly);
+const saveWeekly = async () => {
+  await storage.save('weekly', fitnessWeekly);
+  // trigger live leaderboard updates when weekly data changes
+  try { await updateLeaderboardChannel(); } catch (e) { console.error('saveWeekly -> updateLeaderboardChannel failed', e); }
+};
 const saveMonthly = async () => storage.save('monthly', fitnessMonthly);
 const savePartnerQueue = async () => storage.save('partnerQueue', partnerQueue);
 const savePartners = async () => storage.save('partners', partners);
@@ -130,9 +151,21 @@ const saveFitnessPosts = async () => storage.save('fitnessPosts', fitnessPosts);
 const saveAiHealth = async () => storage.save('ai_health', aiHealth);
 const saveMessageCounts = async () => storage.save('messageCounts', messageCounts);
 const saveAchievements = async () => storage.save('achievements', achievementsStore);
+const saveLeaderRoles = async () => storage.save('leaderRoles', leaderRoles);
+const saveCurrentChampion = async () => storage.save('currentChampion', currentChampion);
 
 // ----- Additional explicit file handles and helpers requested -----
 // Provide the file path constants the user referenced and small save/load helpers
+// Backwards-compatible plain-file mapping (some older code paths expect these)
+const files = {
+  birthdays: path.join(process.cwd(), 'birthdays.json'),
+  monthly: path.join(process.cwd(), 'fitnessmonthly.json'),
+  partners: path.join(process.cwd(), 'partners.json'),
+  partnerQueue: path.join(process.cwd(), 'partnerQueue.json'),
+  strikes: path.join(process.cwd(), 'strikes.json'),
+  challenges: path.join(process.cwd(), 'challenges.json')
+};
+
 const birthdaysFile = files.birthdays;
 const monthlyFile = files.monthly;
 const partnersFile = files.partners;
@@ -300,7 +333,7 @@ function recordAiHealthEvent(event) {
     saveAiHealth();
     // also write to Mongo if available
     if (mongoDb) {
-      try { mongoDb.collection('ai_health').insertOne(Object.assign({ ts: new Date() }, event)); } catch(e){console.error('mongo write failed',e);}    
+      try { mongoDb.collection('ai_health').insertOne(Object.assign({ ts: new Date() }, event)); } catch(e){console.error('mongo write failed',e);}
     }
   } catch (e) { console.error('recordAiHealthEvent error:', e); }
 }
@@ -442,44 +475,11 @@ function simpleSimilarityScore(a,b){
 }
 
 // ---------------- Onboarding ----------------
-async function startOnboarding(user,type){
-  try{
-    const dm = await user.createDM();
-    await dm.send(`Welcome! You selected **${type}** partner. Reply 'cancel' to stop.`);
-    const questions = type==='goal'?[
-      {key:'role',q:'Confirm "goal"'},{key:'goals',q:'Main fitness goals?'},{key:'habits',q:'Which daily habits?'},{key:'checkins',q:'Check-in frequency? (daily/weekly)'},{key:'tags',q:'Keywords/interests?'}
-    ]:[
-      {key:'role',q:'Confirm "future"'},{key:'birthdate',q:'Enter birthdate YYYY-MM-DD'},{key:'interests',q:'List hobbies/interests'},{key:'values',q:'Values/preferences'},{key:'hidden',q:'Provide personal info (or "none")'},{key:'tags',q:'Keywords/interests?'}
-    ];
-    const answers = {}; let step=0;
-    const collector = dm.createMessageCollector({time:1000*60*10});
-    dm.send(questions[step].q);
-    collector.on('collect', m=>{
-      if(m.author.id!==user.id) return;
-      if(m.content.toLowerCase()==='cancel'){collector.stop('cancelled'); return;}
-      const text = m.content.trim();
-      const currentQ = questions[step];
-      if(currentQ.key==='birthdate'){
-        if(!/^\d{4}-\d{2}-\d{2}$/.test(text)){dm.send('Format YYYY-MM-DD'); return;}
-        const age = Math.floor((Date.now()-new Date(text).getTime())/(1000*60*60*24*365.25));
-        if(age<18){dm.send('18+ required'); collector.stop('underage'); return;}
-        answers.birthdate=text;
-      } else answers[currentQ.key]=text;
-      step++; if(step>=questions.length) collector.stop('finished'); else dm.send(questions[step].q);
-    });
-    collector.on('end',async(collected,reason)=>{
-      if(reason==='cancelled'){dm.send('Cancelled'); return;}
-      if(reason==='underage') return;
-      onboarding[user.id]={userId:user.id,type,timestamp:Date.now(),raw:answers,tags:(answers.tags||answers.interests||answers.goals||'').split(',').map(s=>s.trim()).filter(Boolean),hidden:answers.hidden||null};
-      saveOnboarding();
-      partnerQueue.push(user.id); savePartnerQueue();
-      await dm.send('Application recorded. Use !leavequeue to exit.');
-    });
-  } catch(e){ console.error('Onboarding error:',e); }
-}
 
 // ---------------- Matching ----------------
 function tryAutoMatch(){
+  // ensure partnerQueue is an array (robustness against bad saved shapes)
+  if(!Array.isArray(partnerQueue)) partnerQueue = [];
   if(partnerQueue.length<2) return;
   const processed = new Set(); const newPairs=[];
   for(let i=0;i<partnerQueue.length;i++){
@@ -508,32 +508,37 @@ function tryAutoMatch(){
 
 // ---------------- Private Channel + Rules ----------------
 async function createPrivateChannelForPair(guild, userAId, userBId, pairType = 'goal') {
-  const everyoneRole = guild.roles.everyone.id;
-  const perms = [
-    { id: everyoneRole, deny: [PermissionFlagsBits.ViewChannel] },
-    { id: userAId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-    { id: userBId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
-  ];
+  try {
+    const everyoneRole = guild.roles.everyone.id;
+    const perms = [
+      { id: everyoneRole, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: userAId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+      { id: userBId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
+    ];
 
-  // include admin/mod/owner roles if present
-  const adminRole = guild.roles.cache.find(r => r.name.toLowerCase() === 'admin');
-  const modRole = guild.roles.cache.find(r => r.name.toLowerCase() === 'moderator');
-  const ownerRole = guild.roles.cache.find(r => r.name.toLowerCase() === 'owner');
-  [adminRole, modRole, ownerRole].forEach(role => {
-    if (role) perms.push({ id: role.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] });
-  });
+    // include admin/mod/owner roles if present
+    const adminRole = guild.roles.cache.find(r => (r.name||'').toLowerCase() === 'admin');
+    const modRole = guild.roles.cache.find(r => (r.name||'').toLowerCase() === 'moderator');
+    const ownerRole = guild.roles.cache.find(r => (r.name||'').toLowerCase() === 'owner');
+    [adminRole, modRole, ownerRole].forEach(role => {
+      if (role) perms.push({ id: role.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels] });
+    });
 
-  const channelName = `partner-${userAId.slice(0, 4)}-${userBId.slice(0, 4)}`;
-  const channel = await guild.channels.create({
-    name: channelName,
-    type: ChannelType.GuildText,
-    permissionOverwrites: perms
-  });
+    const channelName = `partner-${userAId.slice(0, 4)}-${userBId.slice(0, 4)}`;
+    const channel = await guild.channels.create({ name: channelName, type: ChannelType.GuildText, permissionOverwrites: perms, reason: 'Create partner private channel' });
 
-  await postInitialPinnedRules(channel, { userA: userAId, userB: userBId, type: pairType });
-  return channel;
+    // Initialize partner record and save
+    partners[channel.id] = { channelId: channel.id, guildId: guild.id, userA: userAId, userB: userBId, type: pairType || 'goal', createdAt: Date.now(), exposure: { [userAId]: { messagesExchanged: 0, firstInteraction: null }, [userBId]: { messagesExchanged: 0, firstInteraction: null } } };
+    matches[userAId] = channel.id; matches[userBId] = channel.id;
+    strikes[channel.id] = { [userAId]: 0, [userBId]: 0 };
+    savePartners(); if (saveMatches) saveMatches(); if (saveStrikes) saveStrikes();
+
+    // Post initial pinned rules like the other implementation
+    try { await postInitialPinnedRules(channel, partners[channel.id]); } catch(e){console.error('postInitialPinnedRules',e)}
+
+    return channel;
+  } catch (e) { console.error('createPrivateChannelForPair error:', e); return null; }
 }
-
 // Find or create a category named 'Accountability Partners' and return it
 async function findOrCreateAccountabilityCategory(guild) {
   try {
@@ -615,10 +620,21 @@ async function postInitialPinnedRules(channel, partnerRecord) {
     `Three strikes -> automatic deletion of this channel and block from future matches.`
   ].join('\n\n');
 
-  const pinnedRules = await channel.send({ content: rules });
-  await pinnedRules.pin();
-  const checkinTemplate = await channel.send(`Check-in template:\n• How was your workout today?\n• Any blockers?\n• Plan for tomorrow:`);
-  await checkinTemplate.pin();
+  try {
+    const guild = channel.guild;
+    await ensurePinnedMessage(guild, channel, 'Welcome to your private partner channel', rules, 'partner_rules');
+    const checkin = `Check-in template:\n• How was your workout today?\n• Any blockers?\n• Plan for tomorrow:`;
+    await ensurePinnedMessage(guild, channel, 'Check-in template:', checkin, 'partner_checkin');
+  } catch (e) {
+    console.error('postInitialPinnedRules ensurePinnedMessage failed', e);
+    // fallback to direct send/pin attempt
+    try {
+      const pinnedRules = await channel.send({ content: rules });
+      await pinnedRules.pin();
+      const checkinTemplate = await channel.send(`Check-in template:\n• How was your workout today?\n• Any blockers?\n• Plan for tomorrow:`);
+      await checkinTemplate.pin();
+    } catch (err) { console.error('fallback pin failed', err); }
+  }
 }
 
 // ---------------- Strike Management ----------------
@@ -777,19 +793,133 @@ async function getHealthNews() {
   } catch (e) { console.error('getHealthNews error:', e); return 'Could not fetch health news.'; }
 }
 
-// Update the leaderboard channel with a simple snapshot (non-destructive helper)
+// Update the leaderboard channels across all guilds with a simple snapshot and award Iron Champion
 async function updateLeaderboardChannel() {
   try {
-    const channel = client.channels.cache.find(ch => (ch.name||'').toLowerCase() === 'leaderboard');
-    if (!channel) return;
-    const sorted = Object.entries(fitnessWeekly).sort((a,b)=> (b[1].yes||0) - (a[1].yes||0));
-    if (!sorted.length) { await channel.send('No weekly fitness data yet.'); return; }
-    const medals = ['🥇','🥈','🥉'];
-    let msg = '**WEEKLY LEADERBOARD**\n\n';
-    sorted.slice(0,10).forEach(([uid,data],i)=>{ msg += `${medals[i]||'🔹'} <@${uid}> — ${data.yes||0} workouts\n`; });
-    try { await channel.bulkDelete(10).catch(()=>{}); } catch(e){}
-    await channel.send(msg);
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        const channel = guild.channels.cache.find(ch => (ch.name||'').toLowerCase() === 'leaderboard' && ch.type === ChannelType.GuildText);
+        if (!channel) continue;
+
+        // Consider all fitnessWeekly entries, but prefer users who are members of this guild.
+        const allEntries = Object.entries(fitnessWeekly);
+        // sort globally, then we'll filter/fetch top members for this guild
+        const globalSorted = allEntries.sort((a,b)=> (b[1].yes||0) - (a[1].yes||0));
+
+        // We'll try to produce a per-guild sorted list of up to 10 users who are guild members.
+        const perGuild = [];
+        for (const [uid, data] of globalSorted) {
+          if (perGuild.length >= 10) break;
+          // if member cached, accept immediately
+          if (guild.members.cache.has(uid)) { perGuild.push([uid, data]); continue; }
+          // try to fetch member from API (best-effort, don't throw)
+          try {
+            const fetched = await guild.members.fetch(uid).catch(()=>null);
+            if (fetched) { perGuild.push([uid, data]); continue; }
+          } catch (e) { /* ignore fetch errors */ }
+        }
+
+        const sorted = perGuild;
+        if (!sorted.length) { await channel.send('No weekly fitness data yet.'); continue; }
+
+        const medals = ['🥇','🥈','🥉'];
+        const embed = new EmbedBuilder()
+          .setTitle('🏆 WEEKLY LEADERBOARD')
+          .setColor(0xFFD700)
+          .setTimestamp(new Date())
+          .setDescription('Top performers this week — keep grinding!');
+
+        // attempt to add champion avatar as thumbnail and show avatars for top 3
+        try {
+          const top3 = sorted.slice(0,3);
+          if (top3[0]) {
+            const champId = top3[0][0];
+            const champUser = await client.users.fetch(champId).catch(()=>null);
+            if (champUser) embed.setThumbnail(champUser.displayAvatarURL({ extension: 'png', size: 256 }));
+          }
+          const topFields = [];
+          for (let i=0;i<3;i++) {
+            const row = top3[i];
+            if (!row) break;
+            const uid = row[0]; const data = row[1];
+            const user = await client.users.fetch(uid).catch(()=>null);
+            const name = user ? `${user.username}` : `<@${uid}>`;
+            topFields.push({ name: `${medals[i]||'🔹'} ${name}`, value: `**${data.yes||0}** workouts`, inline: true });
+          }
+          if (topFields.length) embed.addFields(...topFields);
+        } catch (e) { /* ignore avatar fetching errors */ }
+
+        let description = '';
+        sorted.slice(0,10).forEach(([uid,data],i)=>{
+          description += `${medals[i]||'🔹'} <@${uid}> — **${data.yes||0}** workouts\n`;
+        });
+        embed.addFields({ name: 'Top 10', value: description || 'No data', inline: false });
+
+        // Try to update existing pinned leaderboard message in channel, otherwise send new and pin
+        let existingMsg = null;
+        try {
+          const pins = await channel.messages.fetchPinned();
+          existingMsg = pins.find(m => m.author?.id === client.user.id && m.embeds?.[0]?.title && (m.embeds[0].title||'').toLowerCase().includes('leaderboard')) || null;
+        } catch (e) { existingMsg = null; }
+
+        let sent = null;
+        if (existingMsg) {
+          try { await existingMsg.edit({ embeds: [embed] }); sent = existingMsg; } catch(e){ sent = null; }
+        }
+        if (!sent) {
+          try { sent = await channel.send({ embeds: [embed] }); try { await sent.pin(); } catch(e){} } catch(e){ console.error('send leaderboard failed', e); }
+        }
+
+        // Award the Iron Champion achievement to the top user (idempotent)
+        try {
+          const topUid = sorted[0] && sorted[0][0];
+          if (topUid) {
+            await awardAchievement(guild, topUid, ACHIEVEMENTS.iron_champion.id).catch(()=>{});
+            // assign leader role if configured
+            try { await assignLeaderRole(guild, topUid); } catch (e) { console.error('assignLeaderRole failed', e); }
+          }
+        } catch (e) { console.error('award iron champion failed', e); }
+      } catch (e) { console.error('updateLeaderboardChannel per-guild error:', e); }
+    }
   } catch (e) { console.error('updateLeaderboardChannel error:', e); }
+}
+
+// Assign the configured leader role to a user in the guild and revoke from previous champion
+async function assignLeaderRole(guild, userId) {
+  try {
+    const roleId = leaderRoles[guild.id];
+    if (!roleId) return; // nothing configured
+
+    const prev = currentChampion[guild.id];
+    if (prev === userId) return; // already the champion
+
+    // Revoke role from previous champion
+    if (prev) {
+      try {
+        const prevMember = await guild.members.fetch(prev).catch(()=>null);
+        if (prevMember) {
+          const role = guild.roles.cache.get(roleId);
+          if (role && guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+            await prevMember.roles.remove(role).catch(()=>{});
+          }
+        }
+      } catch(e){ console.error('revoke prev champion role failed', e); }
+    }
+
+    // Grant role to new champion
+    try {
+      const member = await guild.members.fetch(userId).catch(()=>null);
+      if (member) {
+        const role = guild.roles.cache.get(roleId);
+        if (role && guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)) {
+          await member.roles.add(role).catch(()=>{});
+        }
+      }
+    } catch(e){ console.error('assign champion role failed', e); }
+
+    currentChampion[guild.id] = userId;
+    await saveCurrentChampion();
+  } catch (e) { console.error('assignLeaderRole error', e); }
 }
 
 // ---------------- Command Handlers ----------------
@@ -835,7 +965,7 @@ const commandHandlers = {
     if (!fitnessWeekly[authorId]) fitnessWeekly[authorId] = { yes: 0, no: 0 };
 
     const isYes = ['yes', 'y'].includes(type);
-    
+
     const zone = process.env.TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     const todayIso = DateTime.now().setZone(zone).toISODate();
 
@@ -875,16 +1005,16 @@ const commandHandlers = {
 
   async leaderboard(message) {
     const sorted = Object.entries(fitnessWeekly).sort((a, b) => b[1].yes - a[1].yes);
-    
+
     if (!sorted.length) return message.reply("No fitness data recorded this week.");
-    
+
   let msg = "🏆 **WEEKLY LEADERBOARD** 🏆\n\n";
   const medals = ["🥇", "🥈", "🥉"];
-    
+
     sorted.slice(0, 5).forEach(([userId, data], index) => {
       msg += `${medals[index] || "🔹"} <@${userId}> - ${data.yes} workouts\n`;
     });
-    
+
     return message.reply(msg);
   },
 
@@ -894,7 +1024,7 @@ const commandHandlers = {
 
     const authorId = message.author.id;
     if (!habitTracker[authorId]) habitTracker[authorId] = {};
-    
+
     if (habitTracker[authorId][habit]) {
       return message.reply("You're already tracking that habit!");
     }
@@ -904,7 +1034,7 @@ const commandHandlers = {
       lastChecked: null,
       total: 0
     };
-    
+
   saveHabits();
   return message.reply(`✅ Started tracking: **${habit}**\nUse \`!check ${habit}\` daily!`);
   },
@@ -912,7 +1042,7 @@ const commandHandlers = {
   async habits(message) {
     const authorId = message.author.id;
     const userHabits = habitTracker[authorId] || {};
-    
+
     if (Object.keys(userHabits).length === 0) {
       return message.reply("No habits tracked! Use `!addhabit [habit]` to start.");
     }
@@ -963,7 +1093,7 @@ const commandHandlers = {
       "Diamonds are formed under pressure.",
       "Be stronger than your excuses."
     ];
-    
+
   const quote = quotes[Math.floor(Math.random() * quotes.length)];
     return message.reply(quote);
   },
@@ -1088,13 +1218,13 @@ const commandHandlers = {
     if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
 
     try {
-      const grouped = [
-        { name: 'fitness', description: 'Fitness-related commands', subcommands: ['track','progress','leaderboard','workoutplan'] },
-        { name: 'habits', description: 'Habits management', subcommands: ['add','habits','check'] },
-        { name: 'coach', description: 'Coaching tools', subcommands: ['coach','quote'] },
-        { name: 'partners', description: 'Partner matching', subcommands: ['partner','leavequeue'] },
-  { name: 'admin', description: 'Admin utilities', subcommands: ['setmodel','getmodel','setfallback','getaihealth','testai','registerslashes','pindocs','listcommands'] }
-      ];
+  const grouped = [
+    { name: 'fitness', description: 'Fitness-related commands', subcommands: ['track','progress','leaderboard','workoutplan'] },
+    { name: 'habits', description: 'Habits management', subcommands: ['add','habits','check'] },
+    { name: 'coach', description: 'Coaching tools', subcommands: ['coach','quote'] },
+    { name: 'partners', description: 'Partner matching', subcommands: ['partner','leavequeue'] },
+  { name: 'admin', description: 'Admin utilities', subcommands: ['setmodel','getmodel','setfallback','getaihealth','testai','registerslashes','pindocs','listcommands','setleaderrole','clearleaderrole'] }
+  ];
 
       const cmdDefs = grouped.map(g => ({
         name: g.name.slice(0,32),
@@ -1114,6 +1244,67 @@ const commandHandlers = {
       console.error('registerslashes failed', e);
       return message.reply('Failed to register slash commands: '+String(e));
     }
+  },
+
+  // Admin: set leader role for champion assignment
+  async setleaderrole(message, args) {
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    // Support slash: message.slashOptions.role (Role object), or prefix mention as args[0]
+    let role = null;
+    if (message.slashOptions && message.slashOptions.role) {
+      role = message.slashOptions.role;
+    } else {
+      const roleMention = args[0];
+      if (!roleMention) return message.reply('Usage: `!setleaderrole @Role`');
+      const roleId = roleMention.replace(/[^0-9]/g, '');
+      role = message.guild.roles.cache.get(roleId);
+    }
+    if (!role) return message.reply('Role not found in this server.');
+
+    leaderRoles[message.guild.id] = role.id;
+    await saveLeaderRoles();
+    return message.reply(`Leader role set to ${role.name}`);
+  },
+
+  async clearleaderrole(message) {
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    if (leaderRoles[message.guild.id]) {
+      delete leaderRoles[message.guild.id];
+      await saveLeaderRoles();
+      return message.reply('Leader role cleared for this server.');
+    }
+    return message.reply('No leader role configured for this server.');
+  },
+
+  // Admin: force leaderboard update now
+  async forceleaderboard(message) {
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    try { await updateLeaderboardChannel(); return message.reply('Leaderboard update triggered.'); } catch (e) { console.error('forceleaderboard failed', e); return message.reply('Failed to trigger leaderboard.'); }
+  },
+
+  // Admin: force assign champion manually
+  async forcechampion(message, args) {
+    const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+    const isAdmin = member ? member.permissions.has(PermissionFlagsBits.Administrator) : false;
+    const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
+    if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
+
+    const roleMention = args[0] || '';
+    const targetId = (roleMention.match(/\d{17,20}/) || [])[0] || null;
+    if (!targetId) return message.reply('Usage: `!forcechampion @User`');
+    try { const guild = message.guild; await awardAchievement(guild, targetId, ACHIEVEMENTS.iron_champion.id); await assignLeaderRole(guild, targetId); return message.reply('Forced champion assignment complete.'); } catch (e) { console.error('forcechampion failed', e); return message.reply('Failed to force champion.'); }
   },
 
   // Admin: force pin admin & logging docs
@@ -1141,7 +1332,7 @@ const commandHandlers = {
 
   async workoutplan(message, args) {
     const type = args[0]?.toLowerCase() || "general";
-    
+
     const workouts = {
       push: "**PUSH DAY**\n• Push-ups: 3x10-15\n• Pike push-ups: 3x8-12\n• Tricep dips: 3x10-15\n• Plank: 3x30-60s",
       pull: "**PULL DAY**\n• Pull-ups/Chin-ups: 3x5-10\n• Inverted rows: 3x8-12\n• Superman: 3x15\n• Dead hang: 3x20-30s",
@@ -1160,49 +1351,49 @@ const commandHandlers = {
     }
 
     const authorId = message.author.id;
-    
+
     // Check if already in queue
     if (partnerQueue.includes(authorId)) {
       return message.reply("You're already in the matching queue! Use `!leavequeue` to exit.");
     }
-    
+
     // Check if already matched
     if (matches[authorId]) {
       const channelId = matches[authorId];
       return message.reply(`You already have a partner! Check <#${channelId}>`);
     }
-    
+
     // Check if blocked
     if (onboarding[authorId]?.blockedFromMatching) {
       return message.reply("You're currently blocked from matching due to previous violations.");
     }
-    
+
     // Start onboarding
     await message.reply(`Starting ${type} partner onboarding in DMs!`);
     await startOnboarding(message.author, type);
   },
-  
+
   async leavequeue(message) {
     const authorId = message.author.id;
-    
+
     if (!partnerQueue.includes(authorId)) {
       return message.reply("You're not in the matching queue!");
     }
-    
+
     partnerQueue = partnerQueue.filter(id => id !== authorId);
     savePartnerQueue();
-    
+
     return message.reply("You've been removed from the matching queue.");
   },
 
   async mutecheck(message, args) {
     const authorId = message.author.id;
     const duration = args[0]?.toLowerCase();
-    
+
     if (!duration || !['day', 'week', 'forever'].includes(duration)) {
       return message.reply("Usage: `!mutecheck day` or `!mutecheck week` or `!mutecheck forever`");
     }
-    
+
     let endTime;
     switch (duration) {
       case 'day':
@@ -1215,31 +1406,31 @@ const commandHandlers = {
         endTime = Infinity;
         break;
     }
-    
+
     checkInMutes[authorId] = {
       until: endTime,
       startedAt: Date.now()
     };
-    
+
     saveCheckInMutes();
-    
+
     if (duration === 'forever') {
       return message.reply("You've muted check-ins permanently. Use `!unmutecheck` to unmute.");
     } else {
       return message.reply(`You've muted check-ins for one ${duration}. They'll resume automatically after that.`);
     }
   },
-  
+
   async unmutecheck(message) {
     const authorId = message.author.id;
-    
+
     if (!checkInMutes[authorId]) {
       return message.reply("You don't have check-ins muted!");
     }
-    
+
     delete checkInMutes[authorId];
     saveCheckInMutes();
-    
+
     return message.reply("Check-ins have been unmuted. You'll receive reminders again.");
   }
 };
@@ -1273,6 +1464,7 @@ function isCommandAllowedInChannel(command, channel) {
 // ---------------- Dynamic command module loader ----------------
 async function loadCommandModules() {
   try {
+    modulesMeta = [];
     const dir = path.join(process.cwd(), 'src', 'commands');
     if (!fs.existsSync(dir)) return;
     const files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
@@ -1280,7 +1472,8 @@ async function loadCommandModules() {
     for (const f of files) {
       try {
         const modPath = path.join(dir, f);
-        const imported = await import(modPath);
+        const modUrl = pathToFileURL(modPath).href;
+        const imported = await import(modUrl);
           const def = imported.default;
           if (def && def.name && typeof def.execute === 'function') {
           // wrap module's execute to match existing handler signature
@@ -1295,44 +1488,79 @@ async function loadCommandModules() {
           const groupName = def.group || def.slash?.group || 'misc';
           if (!groups[groupName]) groups[groupName] = { name: groupName, description: groupName + ' commands', subcommands: [] };
           groups[groupName].subcommands.push({ name: def.name, slash: def.slash || {} });
+          // store module-level meta for later sync (flatten)
+          modulesMeta.push({ name: def.name, group: groupName, slash: def.slash || {}, description: def.description || '' });
 
           console.log(`Loaded command module: ${def.name} from ${f}`);
         }
       } catch (e) { console.error('Failed to load command module', f, e); }
     }
 
-    // Auto-register slash commands based on loaded modules (group -> subcommands)
-    try {
-      const cmdDefs = Object.values(groups).map(g => ({
-        name: g.name.slice(0,32),
-        description: g.description.slice(0,100),
-        options: g.subcommands.map(sc => {
-          // build subcommand option
-          const base = { name: sc.name.slice(0,32), type: 1, description: `Run ${sc.name}`, options: [] };
-          const opts = sc.slash?.options || sc.slash?.opts || [];
-          for (const o of opts) base.options.push({ name: o.name, type: o.type || 3, description: (o.description||'').slice(0,100), required: !!o.required });
-          // if no options, allow a freeform 'text' string
-          if (!base.options.length) base.options.push({ name: 'text', type: 3, description: 'Arguments as a single string', required: false });
-          return base;
-        })
-      }));
+    // Auto-registration handled separately by buildAndSyncSlashCommands
+    // leave modulesMeta populated and return
+    return;
+  } catch (e) { console.error('loadCommandModules failed', e); }
+}
 
-      if (cmdDefs.length) {
-        if (process.env.SLASH_GUILD_ID) {
-          const targetGuild = client.guilds.cache.get(process.env.SLASH_GUILD_ID);
-          if (targetGuild) await targetGuild.commands.set(cmdDefs);
-        } else if (client.application) {
-          await client.application.commands.set(cmdDefs);
-        }
-        console.log(`Auto-registered ${cmdDefs.length} grouped slash command definitions from modules`);
+// Minimal startup AI health check to avoid missing symbol on some edits
+async function startupAiHealthCheck() {
+  try {
+    // If runHealthCheck exists, we could execute a no-op call per guild; keep light-weight
+    if (typeof runHealthCheck === 'function') {
+      // don't block startup for long-running AI calls; run lightly
+      for (const guild of client.guilds.cache.values()) {
+        try { /* intentionally light: don't call heavy AI on startup */ } catch (e) {}
       }
-    } catch (e) {
-      console.error('Auto slash registration failed:', e);
     }
-  } catch (e) { console.error('loadCommandModules error:', e); }
+  } catch (e) { console.error('startupAiHealthCheck error', e); }
 }
 
 // ---------------- Message Handler ----------------
+// Build and synchronize grouped slash commands from modulesMeta
+async function buildAndSyncSlashCommands(targetGuildId = null) {
+  try {
+    // group modules by their group property
+    const groups = {};
+    for (const m of modulesMeta) {
+      const g = m.group || 'misc';
+      if (!groups[g]) groups[g] = { name: g, description: `${g} commands`, subcommands: [] };
+      // construct option defs from m.slash.options
+      const opts = (m.slash && (m.slash.options || m.slash.opts)) || [];
+      const optionDefs = opts.map(o => {
+        const t = (typeof o.type === 'string' ? o.type.toUpperCase() : o.type);
+        let typeNum = 3; // STRING
+        if (t === 6 || t === 'USER') typeNum = 6;
+        else if (t === 8 || t === 'ROLE') typeNum = 8;
+        else if (t === 4 || t === 'INTEGER') typeNum = 4;
+        else if (t === 5 || t === 'BOOLEAN') typeNum = 5;
+        else if (t === 7 || t === 'CHANNEL') typeNum = 7;
+        return { name: (o.name||'text').slice(0,32), type: typeNum, description: (o.description||'').slice(0,100), required: !!o.required };
+      });
+      if (!optionDefs.length) optionDefs.push({ name: 'text', type: 3, description: 'Arguments as a single string', required: false });
+      groups[g].subcommands.push({ name: m.name.slice(0,32), optionDefs });
+    }
+
+    // Ensure admin setleaderrole has a ROLE option for good UX
+    if (!groups.admin) groups.admin = { name: 'admin', description: 'admin commands', subcommands: [] };
+    if (!groups.admin.subcommands.find(s=>s.name==='setleaderrole')) groups.admin.subcommands.push({ name: 'setleaderrole', optionDefs: [{ name: 'role', type: 8, description: 'Role to assign to the champion', required: true }] });
+
+    const cmdDefs = Object.values(groups).map(g => ({ name: g.name.slice(0,32), description: g.description.slice(0,100), options: g.subcommands.map(sc => ({ name: sc.name.slice(0,32), type: 1, description: `Run ${sc.name}`, options: sc.optionDefs })) }));
+    if (!cmdDefs.length) return { ok: true, count: 0 };
+
+    if (targetGuildId) {
+      const tg = client.guilds.cache.get(targetGuildId);
+      if (tg) await tg.commands.set(cmdDefs);
+    } else if (process.env.SLASH_GUILD_ID) {
+      const targetGuild = client.guilds.cache.get(process.env.SLASH_GUILD_ID);
+      if (targetGuild) await targetGuild.commands.set(cmdDefs);
+    } else if (client.application) {
+      await client.application.commands.set(cmdDefs);
+    }
+    console.log(`Synchronized ${cmdDefs.length} grouped slash commands from modulesMeta`);
+    return { ok: true, count: cmdDefs.length };
+  } catch (e) { console.error('buildAndSyncSlashCommands failed', e); return { ok: false, error: String(e) }; }
+}
+
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
@@ -1342,7 +1570,7 @@ client.on("messageCreate", async (message) => {
   if (!memory[message.author.id]) {
     memory[message.author.id] = { previousMessages: [] };
   }
-  
+
   const userMemory = memory[message.author.id];
   userMemory.previousMessages.push(message.content);
   if (userMemory.previousMessages.length > 5) {
@@ -1371,17 +1599,17 @@ client.on("messageCreate", async (message) => {
   if (partners[message.channel.id]) {
     const rec = partners[message.channel.id];
     const userId = message.author.id;
-    
+
     if (rec.userA === userId || rec.userB === userId) {
       if (!rec.exposure[userId].firstInteraction) {
         rec.exposure[userId].firstInteraction = Date.now();
       }
       rec.exposure[userId].messagesExchanged++;
       savePartners();
-      
+
       // Check for exposure unlocks
       checkExposureUnlocks(message.channel.id);
-      
+
       // Check for forbidden info
       if (containsForbiddenInfo(message.content)) {
         await message.delete().catch(() => {});
@@ -1445,43 +1673,66 @@ async function sendCheckInReminder() {
   }
 }
 
-// ---------------- Health Posts ----------------
-async function postHealthContent() {
+// ---------------- Onboarding ----------------
+async function startOnboarding(user, type) {
   try {
-    // Health topics to generate content about
-    const healthTopics = [
-      "benefits of intermittent fasting",
-      "dangers of processed food additives",
-      "natural anti-inflammatory foods",
-      "harmful effects of seed oils",
-      "benefits of cold exposure therapy",
-      "natural ways to boost testosterone",
-      "how artificial sweeteners affect gut health",
-      "benefits of organ meats and nose-to-tail eating",
-      "how EMF exposure affects sleep quality",
-      "natural alternatives to common medications",
-      "benefits of grounding/earthing",
-      "how industrial seed oils cause inflammation",
-      "benefits of sunlight exposure",
-      "dangers of microplastics in food and water",
-      "how to detox from heavy metals naturally"
+    const dm = await user.createDM();
+
+    const questions = type === 'goal' ? [
+      { key: 'role', q: 'Confirm "goal" (reply yes to continue)' },
+      { key: 'goals', q: 'Main fitness goals? (comma separated)' },
+      { key: 'habits', q: 'Which daily habits will you track? (comma separated)' },
+      { key: 'checkins', q: 'Check-in frequency? (daily/weekly)' },
+      { key: 'tags', q: 'Keywords/interests? (comma separated)' }
+    ] : [
+      { key: 'role', q: 'Confirm "future" (reply yes to continue)' },
+      { key: 'birthdate', q: 'Enter birthdate YYYY-MM-DD' },
+      { key: 'interests', q: 'List hobbies/interests (comma separated)' },
+  { key: 'values', q: "Values / preferences you'd like a partner to know" },
+      { key: 'hidden', q: 'Provide personal info to share with partner (or "none")' },
+      { key: 'tags', q: 'Keywords / interests? (comma separated)' }
     ];
-    
-    const randomTopic = healthTopics[Math.floor(Math.random() * healthTopics.length)];
-    
-    const prompt = `You are a health expert who focuses on natural healing, longevity, and health information that's not commonly discussed in mainstream medicine. Write a concise, informative post (max 250 words) about ${randomTopic}. Include scientific backing where possible, but focus on practical advice. Format with markdown headings and bullet points for readability.`;
-    
-    const content = await getOpenAIResponse(prompt);
-    
-    for (const guild of client.guilds.cache.values()) {
-      const healthChannel = guild.channels.cache.find(ch => ch.name === 'health');
-        if (healthChannel) {
-        await healthChannel.send(`🩺 **HEALTH INSIGHT** 🩺\n\n${content}`);
+
+    const answers = {};
+    let step = 0;
+    const collector = dm.createMessageCollector({ time: 1000 * 60 * 10 });
+    await dm.send(questions[step].q);
+
+    collector.on('collect', m => {
+      if (m.author.id !== user.id) return;
+      if (m.content.toLowerCase() === 'cancel') { collector.stop('cancelled'); return; }
+      const text = m.content.trim();
+      const currentQ = questions[step];
+      if (currentQ.key === 'birthdate') {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) { dm.send('Format YYYY-MM-DD'); return; }
+        const age = Math.floor((Date.now() - new Date(text).getTime()) / (1000 * 60 * 60 * 24 * 365.25));
+        if (age < 18) { dm.send('You must be 18+ to participate.'); collector.stop('underage'); return; }
+        answers.birthdate = text;
+      } else {
+        answers[currentQ.key] = text;
       }
-    }
-  } catch (error) {
-    console.error("Error posting health content:", error);
-  }
+      step++;
+      if (step >= questions.length) collector.stop('finished');
+      else dm.send(questions[step].q).catch(()=>{});
+    });
+
+    collector.on('end', async (collected, reason) => {
+      if (reason === 'cancelled') { dm.send('Cancelled'); return; }
+      if (reason === 'underage') return;
+      onboarding[user.id] = {
+        userId: user.id,
+        type,
+        timestamp: Date.now(),
+        raw: answers,
+        tags: (answers.tags || answers.interests || answers.goals || '').split(',').map(s => s.trim()).filter(Boolean),
+        hidden: answers.hidden || null
+      };
+      await saveOnboarding();
+      partnerQueue.push(user.id);
+      await savePartnerQueue();
+      await dm.send('Application recorded. Use !leavequeue to exit.');
+    });
+  } catch (e) { console.error('Onboarding error:', e); }
 }
 
 // Update or post a pinned health embed in the guild's #gbb-health channel
@@ -1574,13 +1825,13 @@ async function postWealthTip() {
       "cash flow investing principles",
       "creating generational wealth"
     ];
-    
+
     const randomTopic = wealthTopics[Math.floor(Math.random() * wealthTopics.length)];
-    
+
     const prompt = `You are a wealth-building expert who shares insider financial knowledge that banks and financial institutions don't advertise. Write a concise, practical tip (max 250 words) about ${randomTopic}. Focus on actionable advice for men in their 20s-30s. Format with a clear headline and bullet points for key takeaways.`;
-    
+
     const content = await getOpenAIResponse(prompt);
-    
+
     for (const guild of client.guilds.cache.values()) {
       const wealthChannel = guild.channels.cache.find(ch => ch.name === 'wealth');
         if (wealthChannel) {
@@ -1613,21 +1864,21 @@ async function postFitnessContent() {
       "training for muscle definition",
       "hybrid athlete training methods"
     ];
-    
+
     const randomTopic = fitnessTopics[Math.floor(Math.random() * fitnessTopics.length)];
-    
+
     // First, get a YouTube video recommendation
     const videoPrompt = `You are a fitness expert specializing in men's fitness for those in their teens, 20s and early 30s. Recommend ONE specific YouTube video about "${randomTopic}". Provide ONLY the exact YouTube video title and channel name in this format: "Video Title | Channel Name". Choose videos from popular fitness channels like AthleanX, Jeff Nippard, Jeremy Ethier, Hybrid Calisthenics, or similar quality channels.`;
-    
+
     const videoRecommendation = await getOpenAIResponse(videoPrompt);
-    
+
     // Then, get training tips on the same topic
     const tipsPrompt = `You are a fitness expert specializing in men's fitness for those in their teens, 20s and early 30s. Write 3-4 practical, science-based tips about "${randomTopic}". Format as bullet points. Keep it concise, motivational, and immediately applicable.`;
-    
+
     const fitnessTips = await getOpenAIResponse(tipsPrompt);
-    
+
   const message = `💪 **FITNESS FOCUS: ${randomTopic.toUpperCase()}** 💪\n\n${fitnessTips}\n\n🎬 **RECOMMENDED WATCH:**\n${videoRecommendation}`;
-    
+
     for (const guild of client.guilds.cache.values()) {
       const fitnessChannel = guild.channels.cache.find(ch => ch.name === 'fitness');
       if (fitnessChannel) {
@@ -1648,19 +1899,19 @@ cron.schedule('0 9 * * *', async () => {
       "Your body can stand almost anything. It's your mind you have to convince.",
       "Success isn't given. It's earned in the gym and through discipline."
     ];
-    
+
     const quote = quotes[Math.floor(Math.random() * quotes.length)];
-    
+
     for (const guild of client.guilds.cache.values()) {
-      const generalChannel = guild.channels.cache.find(ch => 
+      const generalChannel = guild.channels.cache.find(ch =>
         ch.name === "general" || ch.name === "main" || ch.name === "chat"
       );
-      
+
       if (generalChannel) {
         await generalChannel.send(`**DAILY MOTIVATION**\n${quote}`);
       }
     }
-    
+
     console.log("Sent daily motivation");
   } catch (error) {
     console.error("Error sending daily motivation:", error);
@@ -1686,10 +1937,26 @@ CHECK_IN_TIMES.forEach(time => {
 });
 
 // ---------------- Check muted users (once a day) ----------------
+// Provide a safe fallback for checkMutedUsers if missing from earlier edits
+async function checkMutedUsers() {
+  try {
+    // iterate muted users and remove expired entries
+    const now = Date.now();
+    let changed = false;
+    for (const uid of Object.keys(checkInMutes || {})) {
+      const rec = checkInMutes[uid];
+      if (!rec) continue;
+      if (rec.until && rec.until !== Infinity && now > rec.until) {
+        delete checkInMutes[uid]; changed = true;
+      }
+    }
+    if (changed) await saveCheckInMutes();
+  } catch (e) { console.error('checkMutedUsers error', e); }
+}
+
 cron.schedule('0 10 * * *', checkMutedUsers);
 
 // ---------------- Health posts ----------------
-cron.schedule(HEALTH_POST_CRON, postHealthContent);
 
 // ---------------- Wealth tips ----------------
 cron.schedule(WEALTH_TIP_CRON, postWealthTip);
@@ -1800,7 +2067,7 @@ client.once('ready', async () => {
 
   for (const guild of client.guilds.cache.values()) {
     try {
-      await pinCommandDocs(guild);
+      if (typeof pinCommandDocs === 'function') await pinCommandDocs(guild);
       // log that pinning was attempted
       try { adminLog(guild, `Pinned admin docs and logging docs during startup.`); } catch(e){}
     } catch (e) { console.error('Error pinning docs for guild', guild.id, e); }
@@ -1824,7 +2091,7 @@ client.once('ready', async () => {
       } catch (e) { console.error('health scheduler error', e); }
     });
   } catch(e) { }
-  
+
   // --- Slash command registration: register grouped slash commands ---
   try {
     // Define logical groups and their subcommands. Each subcommand can accept a single 'text' string argument.
@@ -1851,8 +2118,8 @@ client.once('ready', async () => {
       },
       {
         name: 'admin',
-        description: 'Admin utilities (setmodel, getmodel, setfallback, getaihealth, testai, registerslashes)',
-        subcommands: ['setmodel','getmodel','setfallback','getaihealth','testai','registerslashes']
+        description: 'Admin utilities (setmodel, getmodel, setfallback, getaihealth, testai, registerslashes, leader role)',
+        subcommands: ['setmodel','getmodel','setfallback','getaihealth','testai','registerslashes','setleaderrole','clearleaderrole']
       }
     ];
 
@@ -1867,14 +2134,9 @@ client.once('ready', async () => {
       }))
     }));
 
-    if (process.env.SLASH_GUILD_ID) {
-      const targetGuild = client.guilds.cache.get(process.env.SLASH_GUILD_ID);
-      if (targetGuild) await targetGuild.commands.set(cmdDefs);
-    } else if (client.application) {
-      await client.application.commands.set(cmdDefs);
-    }
-
-    console.log(`Registered ${cmdDefs.length} grouped slash commands`);
+    // Attempt to auto-sync all module-defined slash commands
+    await buildAndSyncSlashCommands();
+    console.log('Attempted to synchronize module slash commands at startup');
   } catch (e) { console.error('Slash command registration failed:', e); }
 });
 client.on('error', console.error);
@@ -1940,11 +2202,24 @@ client.on('interactionCreate', async (interaction) => {
 
     const args = text.trim() ? text.trim().split(/ +/g) : [];
 
+    // Build slashOptions map for typed inputs (role/user/channel/id etc.)
+    const slashOptions = {};
+    try {
+      for (const opt of interaction.options.data || []) {
+        slashOptions[opt.name] = opt.value || (opt.resolved ? opt.resolved : null);
+        // For role/user/channel we can resolve by id using resolved
+        if (interaction.options.getRole && interaction.options.getRole(opt.name)) slashOptions[opt.name] = interaction.options.getRole(opt.name);
+        if (interaction.options.getUser && interaction.options.getUser(opt.name)) slashOptions[opt.name] = interaction.options.getUser(opt.name);
+        if (interaction.options.getChannel && interaction.options.getChannel(opt.name)) slashOptions[opt.name] = interaction.options.getChannel(opt.name);
+      }
+    } catch (e) { /* ignore */ }
+
     const fakeMessage = {
       author: interaction.user,
       member: interaction.member,
       guild: interaction.guild,
       channel: interaction.channel,
+      slashOptions,
       reply: async (payload) => {
         const content = typeof payload === 'string' ? payload : (payload.content || JSON.stringify(payload));
         if (!interaction.replied && !interaction.deferred) return interaction.reply({ content, fetchReply: true });
