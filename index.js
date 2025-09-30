@@ -1,1 +1,1 @@
-import './bot.js';
+import './src/bot.js';

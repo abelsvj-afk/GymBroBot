@@ -4,6 +4,9 @@ import { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits, ChannelTy
 import OpenAI from 'openai';
 import express from 'express';
 import { MongoClient } from 'mongodb';
+import Storage from './src/storage.js';
+import { runHealthCheck } from './src/commands/health.js';
+import { DateTime } from 'luxon';
 import fs from 'fs';
 import path from 'path';
 import cron from 'node-cron';
@@ -38,18 +41,9 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Optional MongoDB connection (useful for persistent audit logs across restarts)
-let mongoClient = null;
-let mongoDb = null;
 const MONGO_URI = process.env.MONGO_URI || null;
-async function tryConnectMongo() {
-  if (!MONGO_URI) return;
-  try {
-    mongoClient = new MongoClient(MONGO_URI);
-    await mongoClient.connect();
-    mongoDb = mongoClient.db();
-    console.log('[Mongo] Connected to MongoDB');
-  } catch (e) { console.error('[Mongo] Connection failed:', e); mongoClient=null; mongoDb=null; }
-}
+const storage = new Storage(MONGO_URI, path.join(process.cwd(), 'data'));
+async function tryConnectMongo() { await storage.connect(); }
 
 // Railway API placeholder: implement only if you set RAILWAY_API_KEY and RAILWAY_PROJECT_ID in env.
 // This function is a safe no-op unless you provide those credentials and uncomment the actual call site.
@@ -65,78 +59,70 @@ async function updateRailwayEnvVar(key, value) {
 }
 
 // ---------------- Persistent Data ----------------
-const dataDir = './data';
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-
-const files = {
-  memory: path.join(dataDir, 'memory.json'),
-  birthdays: path.join(dataDir, 'birthdays.json'),
-  weekly: path.join(dataDir, 'weekly.json'),
-  monthly: path.join(dataDir, 'monthly.json'),
-  partnerQueue: path.join(dataDir, 'partnerQueue.json'),
-  partners: path.join(dataDir, 'partners.json'),
-  strikes: path.join(dataDir, 'strikes.json'),
-  habits: path.join(dataDir, 'habits.json'),
-  challenges: path.join(dataDir, 'challenges.json'),
-  onboarding: path.join(dataDir, 'onboarding.json'),
-  matches: path.join(dataDir, 'matches.json'),
-  leaderboard: path.join(dataDir, 'leaderboard.json'),
-  checkInMutes: path.join(dataDir, 'checkInMutes.json'),
-  healthPosts: path.join(dataDir, 'healthPosts.json'),
-  wealthTips: path.join(dataDir, 'wealthTips.json'),
-  fitnessPosts: path.join(dataDir, 'fitnessPosts.json')
-  , aiHealth: path.join(dataDir, 'ai_health.json')
-};
-
+// In-memory state (will be loaded via storage.load)
 let memory = {}, birthdays = {}, fitnessWeekly = {}, fitnessMonthly = {};
 let partnerQueue = [], partners = {}, strikes = {}, habitTracker = {};
 let challenges = {}, onboarding = {}, matches = {}, leaderboardPotential = {};
 let checkInMutes = {}, healthPosts = [], wealthTips = [], fitnessPosts = [];
 let aiHealth = [];
+let commandDocsPins = [];
+let lastHealthAlert = {};
 
 // ---------------- Save/Load Helpers ----------------
-const safeWrite = (file, obj) => { try { fs.writeFileSync(file, JSON.stringify(obj, null, 2)); } catch(e){ console.error(`Error saving ${file}:`, e); } };
-const safeRead = (file, fallback) => { try { if(fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8')); } catch(e){ console.error(`Error loading ${file}:`, e); } return fallback; };
+// Storage-backed load/save helpers
+async function loadAllData() {
+  memory = await storage.load('memory', {});
+  birthdays = await storage.load('birthdays', {});
+  fitnessWeekly = await storage.load('weekly', {});
+  fitnessMonthly = await storage.load('monthly', {});
+  partnerQueue = await storage.load('partnerQueue', []);
+  partners = await storage.load('partners', {});
+  strikes = await storage.load('strikes', {});
+  habitTracker = await storage.load('habits', {});
+  challenges = await storage.load('challenges', {});
+  onboarding = await storage.load('onboarding', {});
+  matches = await storage.load('matches', {});
+  leaderboardPotential = await storage.load('leaderboard', {});
+  checkInMutes = await storage.load('checkInMutes', {});
+  healthPosts = await storage.load('healthPosts', []);
+  commandDocsPins = await storage.load('commandDocsPins', []);
+  wealthTips = await storage.load('wealthTips', []);
+  fitnessPosts = await storage.load('fitnessPosts', []);
+  aiHealth = await storage.load('ai_health', []);
+  lastHealthAlert = await storage.load('lastHealthAlert', {});
+  console.log('All data loaded (storage)');
+}
 
-const saveLoadMap = {
-  memory: [() => safeWrite(files.memory, memory), () => memory = safeRead(files.memory, {})],
-  weekly: [() => safeWrite(files.weekly, fitnessWeekly), () => fitnessWeekly = safeRead(files.weekly, {})],
-  monthly: [() => safeWrite(files.monthly, fitnessMonthly), () => fitnessMonthly = safeRead(files.monthly, {})],
-  partnerQueue: [() => safeWrite(files.partnerQueue, partnerQueue), () => partnerQueue = safeRead(files.partnerQueue, [])],
-  partners: [() => safeWrite(files.partners, partners), () => partners = safeRead(files.partners, {})],
-  strikes: [() => safeWrite(files.strikes, strikes), () => strikes = safeRead(files.strikes, {})],
-  habits: [() => safeWrite(files.habits, habitTracker), () => habitTracker = safeRead(files.habits, {})],
-  challenges: [() => safeWrite(files.challenges, challenges), () => challenges = safeRead(files.challenges, {})],
-  onboarding: [() => safeWrite(files.onboarding, onboarding), () => onboarding = safeRead(files.onboarding, {})],
-  matches: [() => safeWrite(files.matches, matches), () => matches = safeRead(files.matches, {})],
-  leaderboard: [() => safeWrite(files.leaderboard, leaderboardPotential), () => leaderboardPotential = safeRead(files.leaderboard, {})],
-  checkInMutes: [() => safeWrite(files.checkInMutes, checkInMutes), () => checkInMutes = safeRead(files.checkInMutes, {})],
-  healthPosts: [() => safeWrite(files.healthPosts, healthPosts), () => healthPosts = safeRead(files.healthPosts, [])],
-  wealthTips: [() => safeWrite(files.wealthTips, wealthTips), () => wealthTips = safeRead(files.wealthTips, [])],
-  fitnessPosts: [() => safeWrite(files.fitnessPosts, fitnessPosts), () => fitnessPosts = safeRead(files.fitnessPosts, [])]
-  , aiHealth: [() => safeWrite(files.aiHealth, aiHealth), () => aiHealth = safeRead(files.aiHealth, [])]
-};
+async function saveAllData() {
+  await Promise.all([
+    storage.save('memory', memory), storage.save('birthdays', birthdays), storage.save('weekly', fitnessWeekly), storage.save('monthly', fitnessMonthly),
+    storage.save('partnerQueue', partnerQueue), storage.save('partners', partners), storage.save('strikes', strikes), storage.save('habits', habitTracker),
+    storage.save('challenges', challenges), storage.save('onboarding', onboarding), storage.save('matches', matches), storage.save('leaderboard', leaderboardPotential),
+    storage.save('checkInMutes', checkInMutes), storage.save('healthPosts', healthPosts), storage.save('wealthTips', wealthTips), storage.save('fitnessPosts', fitnessPosts)
+  ]).catch(e=>console.error('saveAllData error',e));
+}
 
-function loadAllData() { Object.values(saveLoadMap).forEach(([_, load]) => load()); console.log("All data loaded"); }
-function saveAllData() { Object.values(saveLoadMap).forEach(([save]) => save()); }
+const saveLastHealthAlert = async () => storage.save('lastHealthAlert', lastHealthAlert || {});
 
-// Shorthand save functions for individual data types
-const saveMemory = () => saveLoadMap.memory[0]();
-const saveWeekly = () => saveLoadMap.weekly[0]();
-const saveMonthly = () => saveLoadMap.monthly[0]();
-const savePartnerQueue = () => saveLoadMap.partnerQueue[0]();
-const savePartners = () => saveLoadMap.partners[0]();
-const saveStrikes = () => saveLoadMap.strikes[0]();
-const saveHabits = () => saveLoadMap.habits[0]();
-const saveChallenges = () => saveLoadMap.challenges[0]();
-const saveOnboarding = () => saveLoadMap.onboarding[0]();
-const saveMatches = () => saveLoadMap.matches[0]();
-const saveLeaderboard = () => saveLoadMap.leaderboard[0]();
-const saveCheckInMutes = () => saveLoadMap.checkInMutes[0]();
-const saveHealthPosts = () => saveLoadMap.healthPosts[0]();
-const saveWealthTips = () => saveLoadMap.wealthTips[0]();
-const saveFitnessPosts = () => saveLoadMap.fitnessPosts[0]();
-const saveAiHealth = () => saveLoadMap.aiHealth[0]();
+const saveCommandDocsPins = async () => storage.save('commandDocsPins', commandDocsPins);
+
+// Shorthand async save functions
+const saveMemory = async () => storage.save('memory', memory);
+const saveWeekly = async () => storage.save('weekly', fitnessWeekly);
+const saveMonthly = async () => storage.save('monthly', fitnessMonthly);
+const savePartnerQueue = async () => storage.save('partnerQueue', partnerQueue);
+const savePartners = async () => storage.save('partners', partners);
+const saveStrikes = async () => storage.save('strikes', strikes);
+const saveHabits = async () => storage.save('habits', habitTracker);
+const saveChallenges = async () => storage.save('challenges', challenges);
+const saveOnboarding = async () => storage.save('onboarding', onboarding);
+const saveMatches = async () => storage.save('matches', matches);
+const saveLeaderboard = async () => storage.save('leaderboard', leaderboardPotential);
+const saveCheckInMutes = async () => storage.save('checkInMutes', checkInMutes);
+const saveHealthPosts = async () => storage.save('healthPosts', healthPosts);
+const saveWealthTips = async () => storage.save('wealthTips', wealthTips);
+const saveFitnessPosts = async () => storage.save('fitnessPosts', fitnessPosts);
+const saveAiHealth = async () => storage.save('ai_health', aiHealth);
 
 // ----- Additional explicit file handles and helpers requested -----
 // Provide the file path constants the user referenced and small save/load helpers
@@ -148,15 +134,15 @@ const strikesFile = files.strikes;
 const challengesFile = files.challenges;
 
 // Explicit save function for birthdays (not present earlier)
-function saveBirthdays() { try { safeWrite(birthdaysFile, birthdays); } catch(e){ console.error('saveBirthdays', e); } }
+async function saveBirthdays() { try { await storage.save('birthdays', birthdays); } catch(e){ console.error('saveBirthdays', e); } }
 
 // Explicit load functions (for completeness / easier merging with other bot versions)
-function loadBirthdays() { birthdays = safeRead(birthdaysFile, {}); }
-function loadMonthly() { fitnessMonthly = safeRead(monthlyFile, {}); }
-function loadPartners() { partners = safeRead(partnersFile, {}); }
-function loadPartnerQueue() { partnerQueue = safeRead(partnerQueueFile, []); }
-function loadStrikes() { strikes = safeRead(strikesFile, {}); }
-function loadChallenges() { challenges = safeRead(challengesFile, {}); }
+async function loadBirthdays() { birthdays = await storage.load('birthdays', {}); }
+async function loadMonthly() { fitnessMonthly = await storage.load('monthly', {}); }
+async function loadPartners() { partners = await storage.load('partners', {}); }
+async function loadPartnerQueue() { partnerQueue = await storage.load('partnerQueue', []); }
+async function loadStrikes() { strikes = await storage.load('strikes', {}); }
+async function loadChallenges() { challenges = await storage.load('challenges', {}); }
 
 // Backwards-compatible loader: call the existing loadAllData implementation
 // Some external copies of this bot expect a function named `loadData()`; provide it as an alias.
@@ -337,8 +323,16 @@ async function startupAiHealthCheck() {
 }
 
 // Helper to persist an env var to the .env file in the repo root (simple key=value replacement or append)
-function persistEnvVar(key, value) {
+async function persistEnvVar(key, value) {
   try {
+    // If storage (Mongo) is connected, persist env-like values into a shared '_env' collection
+    if (storage && storage.mongoDb) {
+      const cur = await storage.load('_env', {});
+      cur[key] = value;
+      await storage.save('_env', cur);
+      return true;
+    }
+    // Fallback: write to .env file in repo root
     const envPath = path.resolve(process.cwd(), '.env');
     let content = '';
     if (fs.existsSync(envPath)) content = fs.readFileSync(envPath, 'utf8');
@@ -579,8 +573,7 @@ async function postInitialPinnedRules(channel, partnerRecord) {
 
   const pinnedRules = await channel.send({ content: rules });
   await pinnedRules.pin();
-
-  const checkinTemplate = await channel.send(`Check-in template:\nΓÇó How was your workout today?\nΓÇó Any blockers?\nΓÇó Plan for tomorrow:`);
+  const checkinTemplate = await channel.send(`Check-in template:\n• How was your workout today?\n• Any blockers?\n• Plan for tomorrow:`);
   await checkinTemplate.pin();
 }
 
@@ -675,7 +668,7 @@ function checkExposureUnlocks(channelId) {
         return parts.slice(0, tier).join('\n') || hidden;
       };
 
-      await channel.send(`≡ƒöô **Incremental exposure update:** Tier ${minTier} unlocked! Be respectful.`);
+  await channel.send(`🔓 **Incremental exposure update:** Tier ${minTier} unlocked! Be respectful.`);
       const userA = await client.users.fetch(aId);
       const userB = await client.users.fetch(bId);
       try { await userA.send(`New info about your partner (Tier ${minTier}):\n${reveal(bId, minTier)}`); } catch { await channel.send('DM to userA blocked'); }
@@ -759,13 +752,13 @@ async function updateLeaderboardChannel() {
 const commandHandlers = {
   async help(message) {
     const embed = new EmbedBuilder()
-      .setTitle("≡ƒÆ¬ GymBotBro Commands")
+      .setTitle("💪 GymBotBro Commands")
       .setDescription("Your accountability partner for fitness and life!")
       .addFields(
-        { name: "≡ƒÄ» Fitness", value: "`!track yes/no` - Log workout\n`!progress` - View stats\n`!leaderboard` - Rankings", inline: true },
-        { name: "≡ƒôê Habits", value: "`!addhabit [habit]` - Track habit\n`!habits` - View habits\n`!check [habit]` - Check off", inline: true },
-        { name: "≡ƒÆ¬ Coaching", value: "`!coach [question]` - Get advice\n`!quote` - Motivation\n`!workoutplan` - Get workout", inline: true },
-        { name: "≡ƒæÑ Partners", value: "`!partner goal` - Find accountability partner\n`!partner future` - Find future partner\n`!leavequeue` - Exit matching queue", inline: true }
+        { name: "🏋️ Fitness", value: "`!track yes/no` - Log workout\n`!progress` - View stats\n`!leaderboard` - Rankings", inline: true },
+        { name: "📋 Habits", value: "`!addhabit [habit]` - Track habit\n`!habits` - View habits\n`!check [habit]` - Check off", inline: true },
+        { name: "🤖 Coaching", value: "`!coach [question]` - Get advice\n`!quote` - Motivation\n`!workoutplan` - Get workout", inline: true },
+        { name: "🤝 Partners", value: "`!partner goal` - Find accountability partner\n`!partner future` - Find future partner\n`!leavequeue` - Exit matching queue", inline: true }
       )
       .setColor(0x00AE86);
 
@@ -782,7 +775,7 @@ const commandHandlers = {
 
     try {
       const response = await getOpenAIResponse(prompt);
-      return message.reply(`≡ƒÆ¬ **Coach says:**\n${response}`);
+  return message.reply(`💪 **Coach says:**\n${response}`);
     } catch (error) {
       return message.reply("I'm having trouble thinking right now, try again!");
     }
@@ -799,17 +792,24 @@ const commandHandlers = {
 
     const isYes = ['yes', 'y'].includes(type);
     
+    const zone = process.env.TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const todayIso = DateTime.now().setZone(zone).toISODate();
+
     if (isYes) {
       fitnessWeekly[authorId].yes += 1;
-      await message.react('≡ƒÆ¬');
-      message.reply("Beast mode activated! ≡ƒöÑ");
+      await message.react('💪');
+      await message.reply("Beast mode activated! 🔥");
     } else {
       fitnessWeekly[authorId].no += 1;
-      await message.react('Γ¥î');
-      message.reply("Tomorrow is a new day! ≡ƒÆ»");
+      await message.react('❌');
+      await message.reply("Tomorrow is a new day! 🙂");
     }
 
-    saveWeekly();
+    // update memory last log date for check-in logic
+    if (!memory[authorId]) memory[authorId] = { previousMessages: [] };
+    memory[authorId].lastLogDate = todayIso;
+    await saveWeekly();
+    await saveMemory();
   },
 
   async progress(message) {
@@ -819,10 +819,10 @@ const commandHandlers = {
     const total = data.yes + data.no;
     const rate = total > 0 ? Math.round((data.yes / total) * 100) : 0;
 
-    const embed = new EmbedBuilder()
-      .setTitle(`≡ƒôè ${message.author.username}'s Progress`)
+      const embed = new EmbedBuilder()
+      .setTitle(`📈 ${message.author.username}'s Progress`)
       .addFields(
-        { name: "This Week", value: `Γ£à ${data.yes} workouts\nΓ¥î ${data.no} missed\nSuccess Rate: ${rate}%`, inline: true }
+        { name: "This Week", value: `✅ ${data.yes} workouts\n❌ ${data.no} missed\nSuccess Rate: ${rate}%`, inline: true }
       )
       .setColor(rate >= 70 ? 0x00FF00 : rate >= 50 ? 0xFFFF00 : 0xFF0000);
 
@@ -834,11 +834,11 @@ const commandHandlers = {
     
     if (!sorted.length) return message.reply("No fitness data recorded this week.");
     
-    let msg = "≡ƒÅå **WEEKLY LEADERBOARD** ≡ƒÅå\n\n";
-    const medals = ["≡ƒÑç", "≡ƒÑê", "≡ƒÑë"];
+  let msg = "🏆 **WEEKLY LEADERBOARD** 🏆\n\n";
+  const medals = ["🥇", "🥈", "🥉"];
     
     sorted.slice(0, 5).forEach(([userId, data], index) => {
-      msg += `${medals[index] || "≡ƒö╕"} <@${userId}> - ${data.yes} workouts\n`;
+      msg += `${medals[index] || "🔹"} <@${userId}> - ${data.yes} workouts\n`;
     });
     
     return message.reply(msg);
@@ -861,8 +861,8 @@ const commandHandlers = {
       total: 0
     };
     
-    saveHabits();
-    return message.reply(`Γ£à Started tracking: **${habit}**\nUse \`!check ${habit}\` daily!`);
+  saveHabits();
+  return message.reply(`✅ Started tracking: **${habit}**\nUse \`!check ${habit}\` daily!`);
   },
 
   async habits(message) {
@@ -873,11 +873,11 @@ const commandHandlers = {
       return message.reply("No habits tracked! Use `!addhabit [habit]` to start.");
     }
 
-    let msg = `≡ƒôê **${message.author.username}'s Habits:**\n\n`;
+    let msg = `📋 **${message.author.username}'s Habits:**\n\n`;
     Object.entries(userHabits).forEach(([habit, data]) => {
       const today = new Date().toDateString();
-      const checkedToday = data.lastChecked === today ? " Γ£à" : "";
-      msg += `ΓÇó **${habit}**: ${data.streak} day streak${checkedToday}\n`;
+      const checkedToday = data.lastChecked === today ? " ✅" : "";
+      msg += `• **${habit}**: ${data.streak} day streak${checkedToday}\n`;
     });
 
     return message.reply(msg);
@@ -896,7 +896,7 @@ const commandHandlers = {
     const habitData = habitTracker[authorId][habit];
 
     if (habitData.lastChecked === today) {
-      return message.reply("Already checked off today! ≡ƒÄë");
+      return message.reply("Already checked off today! ✅");
     }
 
     habitData.streak += 1;
@@ -905,22 +905,22 @@ const commandHandlers = {
 
     saveHabits();
 
-    return message.reply(`Γ£à **${habit}** checked off!\n≡ƒöÑ Streak: ${habitData.streak} days`);
+  return message.reply(`✅ **${habit}** checked off!\n🔥 Streak: ${habitData.streak} days`);
   },
 
   async quote(message) {
     const quotes = [
-      "≡ƒÆ¬ The only bad workout is the one that didn't happen.",
-      "≡ƒöÑ Your body can stand almost anything. It's your mind you have to convince.",
-      "ΓÜí Success isn't given. It's earned in the gym.",
-      "≡ƒÅå The pain you feel today will be the strength you feel tomorrow.",
-      "≡ƒÆ» Your only limit is your mind. Push past it.",
-      "≡ƒÄ» Don't wish for it, work for it.",
-      "≡ƒÆÄ Diamonds are formed under pressure.",
-      "Γ¡É Be stronger than your excuses."
+      "Rise and grind! Today's your day to be better than yesterday.",
+      "Your body can stand almost anything. It's your mind you have to convince.",
+      "Success isn't given. It's earned in the gym.",
+      "The pain you feel today will be the strength you feel tomorrow.",
+      "Your only limit is your mind. Push past it.",
+      "Don't wish for it, work for it.",
+      "Diamonds are formed under pressure.",
+      "Be stronger than your excuses."
     ];
     
-    const quote = quotes[Math.floor(Math.random() * quotes.length)];
+  const quote = quotes[Math.floor(Math.random() * quotes.length)];
     return message.reply(quote);
   },
 
@@ -957,8 +957,8 @@ const commandHandlers = {
     try { adminLog(message.guild, `User <@${message.author.id}> set model -> ${model} ${saveFlag ? '(saved to .env)' : ''}`); } catch(e){}
 
     if (saveFlag) {
-      const ok = persistEnvVar('OPENAI_MODEL', model);
-      if (ok) message.reply('Saved to .env'); else message.reply('Failed to save to .env');
+      const ok = await persistEnvVar('OPENAI_MODEL', model);
+      if (ok) await message.reply('Saved to .env'); else await message.reply('Failed to save to .env');
     }
   },
 
@@ -983,8 +983,8 @@ const commandHandlers = {
 
     message.reply(`Fallback model set to ${model}`);
     if (saveFlag) {
-      const ok = persistEnvVar('FALLBACK_OPENAI_MODEL', model);
-      if (ok) message.reply('Saved to .env'); else message.reply('Failed to save to .env');
+      const ok = await persistEnvVar('FALLBACK_OPENAI_MODEL', model);
+      if (ok) await message.reply('Saved to .env'); else await message.reply('Failed to save to .env');
     }
   },
 
@@ -1006,7 +1006,7 @@ const commandHandlers = {
 
     if (!entries.length) return message.reply('No ai health events found.');
 
-    const fields = entries.map(e => ({ name: new Date(e.ts).toLocaleString(), value: `${e.type} ΓÇó ${e.model||''} ΓÇó ${e.user?`by <@${e.user}>` : ''} ${e.ok===false?`ΓÇó ERROR: ${e.error}`:''}` })).slice(0,10);
+  const fields = entries.map(e => ({ name: new Date(e.ts).toLocaleString(), value: `${e.type} • ${e.model||''} • ${e.user?`by <@${e.user}>` : ''} ${e.ok===false?`• ERROR: ${e.error}`:''}` })).slice(0,10);
     await sendLogEmbed(message.channel, 'AI Health (recent)', fields);
   },
 
@@ -1044,10 +1044,18 @@ const commandHandlers = {
     if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or the bot owner to run this command.');
 
     try {
-      const cmdDefs = Object.keys(commandHandlers).map(name => ({
-        name: name.toLowerCase().slice(0,32),
-        description: `Run ${name} (prefix: !${name})`,
-        options: [ { name: 'text', type: 3, description: 'Arguments as a single string', required: false } ]
+      const grouped = [
+        { name: 'fitness', description: 'Fitness-related commands', subcommands: ['track','progress','leaderboard','workoutplan'] },
+        { name: 'habits', description: 'Habits management', subcommands: ['add','habits','check'] },
+        { name: 'coach', description: 'Coaching tools', subcommands: ['coach','quote'] },
+        { name: 'partners', description: 'Partner matching', subcommands: ['partner','leavequeue'] },
+        { name: 'admin', description: 'Admin utilities', subcommands: ['setmodel','getmodel','setfallback','getaihealth','testai','registerslashes'] }
+      ];
+
+      const cmdDefs = grouped.map(g => ({
+        name: g.name.slice(0,32),
+        description: g.description,
+        options: g.subcommands.map(sc => ({ name: sc.slice(0,32), type: 1, description: `Run ${sc}`, options: [{ name: 'text', type: 3, description: 'Arguments as a single string', required: false }] }))
       }));
 
       if (process.env.SLASH_GUILD_ID) {
@@ -1057,7 +1065,7 @@ const commandHandlers = {
         await client.application.commands.set(cmdDefs);
       }
 
-      await message.reply(`Registered ${cmdDefs.length} slash commands`);
+      await message.reply(`Registered ${cmdDefs.length} grouped slash commands`);
     } catch (e) {
       console.error('registerslashes failed', e);
       return message.reply('Failed to register slash commands: '+String(e));
@@ -1068,14 +1076,14 @@ const commandHandlers = {
     const type = args[0]?.toLowerCase() || "general";
     
     const workouts = {
-      push: "**PUSH DAY**\nΓÇó Push-ups: 3x10-15\nΓÇó Pike push-ups: 3x8-12\nΓÇó Tricep dips: 3x10-15\nΓÇó Plank: 3x30-60s",
-      pull: "**PULL DAY**\nΓÇó Pull-ups/Chin-ups: 3x5-10\nΓÇó Inverted rows: 3x8-12\nΓÇó Superman: 3x15\nΓÇó Dead hang: 3x20-30s",
-      legs: "**LEG DAY**\nΓÇó Squats: 3x15-20\nΓÇó Lunges: 3x10 each leg\nΓÇó Calf raises: 3x20\nΓÇó Wall sit: 3x30-45s",
-      general: "**FULL BODY**\nΓÇó Squats: 3x15\nΓÇó Push-ups: 3x10\nΓÇó Plank: 3x30s\nΓÇó Jumping jacks: 3x20"
+      push: "**PUSH DAY**\n• Push-ups: 3x10-15\n• Pike push-ups: 3x8-12\n• Tricep dips: 3x10-15\n• Plank: 3x30-60s",
+      pull: "**PULL DAY**\n• Pull-ups/Chin-ups: 3x5-10\n• Inverted rows: 3x8-12\n• Superman: 3x15\n• Dead hang: 3x20-30s",
+      legs: "**LEG DAY**\n• Squats: 3x15-20\n• Lunges: 3x10 each leg\n• Calf raises: 3x20\n• Wall sit: 3x30-45s",
+      general: "**FULL BODY**\n• Squats: 3x15\n• Push-ups: 3x10\n• Plank: 3x30s\n• Jumping jacks: 3x20"
     };
 
     const workout = workouts[type] || workouts.general;
-    return message.reply(`≡ƒÅï∩╕ÅΓÇìΓÖé∩╕Å **Your Workout Plan:**\n\n${workout}\n\n*Rest 60-90 seconds between sets*`);
+  return message.reply(`🏋️ **Your Workout Plan:**\n\n${workout}\n\n*Rest 60-90 seconds between sets*`);
   },
 
   async partner(message, args) {
@@ -1169,6 +1177,92 @@ const commandHandlers = {
   }
 };
 
+// Map command name -> allowed channel (by name). Use null to allow anywhere.
+const commandChannelLock = {
+  'track': 'daily-check-ins',
+  'leaderboard': 'leaderboard',
+  'progress': null,
+  'partner': null,
+  'leavequeue': null,
+  'workoutplan': null,
+  'addhabit': null,
+  'habits': null,
+  'check': null,
+  'testai': 'admin',
+  'getaihealth': 'admin',
+  'setmodel': 'admin',
+  'setfallback': 'admin',
+  'registerslashes': 'admin'
+};
+
+function isCommandAllowedInChannel(command, channel) {
+  const lock = commandChannelLock[command];
+  if (!lock) return true; // allowed anywhere
+  if (!channel) return false;
+  const cname = (channel.name || '').toLowerCase();
+  return cname === lock.toLowerCase();
+}
+
+// ---------------- Dynamic command module loader ----------------
+async function loadCommandModules() {
+  try {
+    const dir = path.join(process.cwd(), 'src', 'commands');
+    if (!fs.existsSync(dir)) return;
+    const files = fs.readdirSync(dir).filter(f => f.endsWith('.js'));
+    const groups = {};
+    for (const f of files) {
+      try {
+        const modPath = path.join(dir, f);
+        const imported = await import(modPath);
+        const def = imported.default;
+        if (def && def.name && typeof def.execute === 'function') {
+          // wrap module's execute to match existing handler signature
+          commandHandlers[def.name] = async (message, args) => {
+            const context = { client, EmbedBuilder, PermissionFlagsBits, ChannelType, getOpenAIResponse, validateModel, adminLog, storage, saveHabits, savePartnerQueue, savePartners, saveMatches, saveStrikes, saveChallenges, saveWeekly, saveMonthly, saveMemory, habitTracker, fitnessWeekly, partnerQueue, matches, onboarding, startOnboarding };
+            await def.execute(context, message, args);
+          };
+
+          // collect metadata for auto slash registration
+          const groupName = def.group || def.slash?.group || 'misc';
+          if (!groups[groupName]) groups[groupName] = { name: groupName, description: groupName + ' commands', subcommands: [] };
+          groups[groupName].subcommands.push({ name: def.name, slash: def.slash || {} });
+
+          console.log(`Loaded command module: ${def.name} from ${f}`);
+        }
+      } catch (e) { console.error('Failed to load command module', f, e); }
+    }
+
+    // Auto-register slash commands based on loaded modules (group -> subcommands)
+    try {
+      const cmdDefs = Object.values(groups).map(g => ({
+        name: g.name.slice(0,32),
+        description: g.description.slice(0,100),
+        options: g.subcommands.map(sc => {
+          // build subcommand option
+          const base = { name: sc.name.slice(0,32), type: 1, description: `Run ${sc.name}`, options: [] };
+          const opts = sc.slash?.options || sc.slash?.opts || [];
+          for (const o of opts) base.options.push({ name: o.name, type: o.type || 3, description: (o.description||'').slice(0,100), required: !!o.required });
+          // if no options, allow a freeform 'text' string
+          if (!base.options.length) base.options.push({ name: 'text', type: 3, description: 'Arguments as a single string', required: false });
+          return base;
+        })
+      }));
+
+      if (cmdDefs.length) {
+        if (process.env.SLASH_GUILD_ID) {
+          const targetGuild = client.guilds.cache.get(process.env.SLASH_GUILD_ID);
+          if (targetGuild) await targetGuild.commands.set(cmdDefs);
+        } else if (client.application) {
+          await client.application.commands.set(cmdDefs);
+        }
+        console.log(`Auto-registered ${cmdDefs.length} grouped slash command definitions from modules`);
+      }
+    } catch (e) {
+      console.error('Auto slash registration failed:', e);
+    }
+  } catch (e) { console.error('loadCommandModules error:', e); }
+}
+
 // ---------------- Message Handler ----------------
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
@@ -1228,6 +1322,11 @@ client.on("messageCreate", async (message) => {
     const command = args.shift().toLowerCase();
 
     if (commandHandlers[command]) {
+      // enforce channel locks
+      if (!isCommandAllowedInChannel(command, message.channel)) {
+        const allowed = commandChannelLock[command];
+        return message.reply({ content: 'That command must be used in the `' + allowed + '` channel. Please try there.', allowedMentions: { repliedUser: false } });
+      }
       try {
         await commandHandlers[command](message, args);
       } catch (e) {
@@ -1242,76 +1341,17 @@ client.on("messageCreate", async (message) => {
 async function sendCheckInReminder() {
   try {
     for (const guild of client.guilds.cache.values()) {
-      const checkInChannel = guild.channels.cache.find(ch => ch.name === 'daily-check-ins');
-      if (!checkInChannel) continue;
-      
-      const now = new Date();
-      const hour = now.getHours();
-      let message;
-      
-      if (hour < 12) {
-        message = "≡ƒîà **MORNING CHECK-IN**\nDid you work out this morning? Reply with `!track yes` or `!track no`";
-      } else if (hour < 17) {
-        message = "ΓÿÇ∩╕Å **AFTERNOON CHECK-IN**\nHave you worked out today? Reply with `!track yes` or `!track no`";
-      } else {
-        message = "≡ƒîÖ **EVENING CHECK-IN**\nDid you get your workout in today? Reply with `!track yes` or `!track no`";
-      }
-      
-      // Get users who haven't tracked today
-      const unloggedUsers = [];
-      for (const [userId, data] of Object.entries(fitnessWeekly)) {
-        const member = await guild.members.fetch(userId).catch(() => null);
-        if (!member) continue;
-        
-        // Skip muted users
-        if (checkInMutes[userId]) {
-          const mute = checkInMutes[userId];
-          if (mute.until > Date.now()) continue;
-          else delete checkInMutes[userId]; // Remove expired mute
-        }
-        
-        // Check if they've logged today
-        const today = new Date().toDateString();
-        const lastLog = memory[userId]?.lastLogDate;
-        if (lastLog !== today) {
-          unloggedUsers.push(userId);
-        }
-      }
-      
-      if (unloggedUsers.length > 0) {
-        const mentions = unloggedUsers.map(id => `<@${id}>`).join(' ');
-        await checkInChannel.send(`${message}\n\n${mentions}`);
-      } else {
-        await checkInChannel.send(message);
-      }
+      const ch = guild.channels.cache.find(c => ['daily-check-ins', 'check-ins', 'general', 'main', 'chat'].includes((c.name || '').toLowerCase()));
+      if (!ch) continue;
+      const embed = new EmbedBuilder()
+        .setTitle('� Daily Check-In')
+        .setDescription('How was your workout today? Reply with `!track yes` or `!track no`.')
+        .setColor(0x00AE86)
+        .setTimestamp(new Date());
+      try { await ch.send({ embeds: [embed] }); } catch (e) { /* ignore send errors */ }
     }
   } catch (error) {
-    console.error("Error sending check-in reminder:", error);
-  }
-}
-
-// Check for users who have muted check-ins for too long
-async function checkMutedUsers() {
-  try {
-    const now = Date.now();
-    const twoWeeksMs = 14 * 24 * 60 * 60 * 1000;
-    
-    for (const [userId, mute] of Object.entries(checkInMutes)) {
-      if (now - mute.startedAt > twoWeeksMs) {
-        // User has muted for over two weeks
-        for (const guild of client.guilds.cache.values()) {
-          const member = await guild.members.fetch(userId).catch(() => null);
-          if (!member) continue;
-          
-          const accountabilityChannel = guild.channels.cache.find(ch => ch.name === 'accountability-lounge');
-          if (accountabilityChannel) {
-            await accountabilityChannel.send(`≡ƒÜ¿ **ACCOUNTABILITY ALERT** ≡ƒÜ¿\n<@${userId}> has muted check-ins for over two weeks! They might need some motivation and support from the community. Let's check in on them!`);
-          }
-        }
-      }
-    }
-  } catch (error) {
-    console.error("Error checking muted users:", error);
+    console.error('Error sending check-in reminders:', error);
   }
 }
 
@@ -1345,12 +1385,81 @@ async function postHealthContent() {
     
     for (const guild of client.guilds.cache.values()) {
       const healthChannel = guild.channels.cache.find(ch => ch.name === 'health');
-      if (healthChannel) {
-        await healthChannel.send(`≡ƒî┐ **HEALTH INSIGHT** ≡ƒî┐\n\n${content}`);
+        if (healthChannel) {
+        await healthChannel.send(`🩺 **HEALTH INSIGHT** 🩺\n\n${content}`);
       }
     }
   } catch (error) {
     console.error("Error posting health content:", error);
+  }
+}
+
+// Update or post a pinned health embed in the guild's #gbb-health channel
+async function updateHealthForGuild(context, guild) {
+  try {
+    const ch = guild.channels.cache.find(c => (c.name||'').toLowerCase() === 'gbb-health' && c.type === ChannelType.GuildText);
+    if (!ch) return;
+
+    const { embed } = await runHealthCheck(context, guild);
+    // determine if any failing checks exist
+    const overallFail = (function(){
+      try { const e = embed.data.fields || []; return e.some(f => (f.name||'').startsWith('🔴') || (f.value||'').toLowerCase().includes('error') || (f.value||'').toLowerCase().includes('failed')); } catch(e){return false;}
+    })();
+
+    // Try to use stored message id first
+    let existingEntry = healthPosts.find(h => h.guildId === guild.id && h.channelId === ch.id);
+    let existingMessage = null;
+    if (existingEntry && existingEntry.messageId) {
+      try { existingMessage = await ch.messages.fetch(existingEntry.messageId).catch(()=>null); } catch(e) { existingMessage = null; }
+    }
+
+    // If we don't have a stored message, search pinned messages for our health embed
+    if (!existingMessage) {
+      try {
+        const pins = await ch.messages.fetchPinned();
+        existingMessage = pins.find(m => m.author?.id === client.user.id && m.embeds?.[0]?.title?.includes('GymBotBro — Health Scan')) || null;
+      } catch (e) { existingMessage = null; }
+    }
+
+    if (existingMessage) {
+      try {
+        await existingMessage.edit({ embeds: [embed] });
+      } catch (e) { /* ignore edit errors */ }
+      // ensure persistence
+      if (!existingEntry) {
+        healthPosts.push({ guildId: guild.id, channelId: ch.id, messageId: existingMessage.id });
+        await saveHealthPosts();
+      } else if (existingEntry.messageId !== existingMessage.id) {
+        existingEntry.messageId = existingMessage.id; await saveHealthPosts();
+      }
+      return;
+    }
+
+    // Otherwise send a new message and pin it
+    const sent = await ch.send({ embeds: [embed] });
+    try { await sent.pin(); } catch (e) {}
+    // record
+    healthPosts = healthPosts.filter(h => !(h.guildId === guild.id && h.channelId === ch.id));
+    healthPosts.push({ guildId: guild.id, channelId: ch.id, messageId: sent.id });
+    await saveHealthPosts();
+
+    // If health is failing, alert admins (rate-limited per guild)
+    try {
+      if (overallFail) {
+        const last = lastHealthAlert[guild.id] || 0;
+        const now = Date.now();
+        const thirtyMin = 30 * 60 * 1000;
+        if (now - last > thirtyMin) {
+          lastHealthAlert[guild.id] = now; await saveLastHealthAlert();
+          const adminChs = await findAdminChannels(guild);
+          let alertTarget = adminChs.logging || adminChs.admin || adminChs.mod || ch;
+          const alertMsg = `🚨 **GymBotBro Alert:** Health scan detected issues. Check the pinned health report in <#${ch.id}>.`;
+          try { await alertTarget.send({ content: alertMsg }); } catch(e){ try { await ch.send(alertMsg); } catch(e){} }
+        }
+      }
+    } catch(e){ console.error('failed to send health alert', e); }
+  } catch (e) {
+    console.error('updateHealthForGuild error for guild', guild.id, e);
   }
 }
 
@@ -1384,8 +1493,8 @@ async function postWealthTip() {
     
     for (const guild of client.guilds.cache.values()) {
       const wealthChannel = guild.channels.cache.find(ch => ch.name === 'wealth');
-      if (wealthChannel) {
-        await wealthChannel.send(`≡ƒÆ░ **WEALTH BUILDER TIP** ≡ƒÆ░\n\n${content}`);
+        if (wealthChannel) {
+        await wealthChannel.send(`💰 **WEALTH BUILDER TIP** 💰\n\n${content}`);
       }
     }
   } catch (error) {
@@ -1427,7 +1536,7 @@ async function postFitnessContent() {
     
     const fitnessTips = await getOpenAIResponse(tipsPrompt);
     
-    const message = `≡ƒÆ¬ **FITNESS FOCUS: ${randomTopic.toUpperCase()}** ≡ƒÆ¬\n\n${fitnessTips}\n\n≡ƒô║ **RECOMMENDED WATCH:**\n${videoRecommendation}`;
+  const message = `💪 **FITNESS FOCUS: ${randomTopic.toUpperCase()}** 💪\n\n${fitnessTips}\n\n🎬 **RECOMMENDED WATCH:**\n${videoRecommendation}`;
     
     for (const guild of client.guilds.cache.values()) {
       const fitnessChannel = guild.channels.cache.find(ch => ch.name === 'fitness');
@@ -1444,10 +1553,10 @@ async function postFitnessContent() {
 cron.schedule('0 9 * * *', async () => {
   try {
     const quotes = [
-      "≡ƒÆ¬ Rise and grind! Today's your day to be better than yesterday.",
-      "≡ƒöÑ The only bad workout is the one that didn't happen. Make it count!",
-      "ΓÜí Your body can stand almost anything. It's your mind you have to convince.",
-      "≡ƒÅå Success isn't given. It's earned in the gym and through discipline."
+      "Rise and grind! Today's your day to be better than yesterday.",
+      "The only bad workout is the one that didn't happen. Make it count!",
+      "Your body can stand almost anything. It's your mind you have to convince.",
+      "Success isn't given. It's earned in the gym and through discipline."
     ];
     
     const quote = quotes[Math.floor(Math.random() * quotes.length)];
@@ -1506,6 +1615,8 @@ client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   client.user.setActivity("!help for commands");
   loadAllData();
+  // Load optional command modules from src/commands (allows modular commands)
+  await loadCommandModules();
   setInterval(() => tryAutoMatch(), 1000 * 30); // every 30s
 
   // Run startup AI health check and pin admin docs to admin/mod/logging channels
@@ -1519,13 +1630,66 @@ client.once('ready', async () => {
       try { adminLog(guild, `Pinned admin docs and logging docs during startup.`); } catch(e){}
     } catch (e) { console.error('Error pinning docs for guild', guild.id, e); }
   }
-  
-  // --- Slash command registration: create a simple slash command per prefix command ---
+
+  // Post a brief startup health message into #gbb-health where available
   try {
-    const cmdDefs = Object.keys(commandHandlers).map(name => ({
-      name: name.toLowerCase().slice(0,32),
-      description: `Run ${name} (prefix: !${name})`,
-      options: [ { name: 'text', type: 3, description: 'Arguments as a single string', required: false } ]
+    // Run an initial full health run (and schedule periodic updates)
+    const healthContext = { client, storage, validateModel, aiHealth, getOpenAIResponse, adminLog };
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        await updateHealthForGuild(healthContext, guild);
+      } catch (e) { console.error('initial health update failed for guild', guild.id, e); }
+    }
+    // Schedule periodic health updates (every 5 minutes)
+    cron.schedule('*/5 * * * *', async () => {
+      try {
+        for (const guild of client.guilds.cache.values()) {
+          try { await updateHealthForGuild(healthContext, guild); } catch(e){ console.error('scheduled health update failed for guild', guild.id, e); }
+        }
+      } catch (e) { console.error('health scheduler error', e); }
+    });
+  } catch(e) { }
+  
+  // --- Slash command registration: register grouped slash commands ---
+  try {
+    // Define logical groups and their subcommands. Each subcommand can accept a single 'text' string argument.
+    const grouped = [
+      {
+        name: 'fitness',
+        description: 'Fitness-related commands (track, progress, leaderboard, workoutplan)',
+        subcommands: ['track','progress','leaderboard','workoutplan']
+      },
+      {
+        name: 'habits',
+        description: 'Habits management (add, list, check)',
+        subcommands: ['add','habits','check']
+      },
+      {
+        name: 'coach',
+        description: 'Coaching tools (ask, quote)',
+        subcommands: ['coach','quote']
+      },
+      {
+        name: 'partners',
+        description: 'Partner matching (partner, leavequeue)',
+        subcommands: ['partner','leavequeue']
+      },
+      {
+        name: 'admin',
+        description: 'Admin utilities (setmodel, getmodel, setfallback, getaihealth, testai, registerslashes)',
+        subcommands: ['setmodel','getmodel','setfallback','getaihealth','testai','registerslashes']
+      }
+    ];
+
+    const cmdDefs = grouped.map(g => ({
+      name: g.name.slice(0,32),
+      description: g.description,
+      options: g.subcommands.map(sc => ({
+        name: sc.slice(0,32),
+        type: 1, // 1 = SUB_COMMAND
+        description: `Run ${sc} (prefix: !${sc})`,
+        options: [ { name: 'text', type: 3, description: 'Arguments as a single string', required: false } ]
+      }))
     }));
 
     if (process.env.SLASH_GUILD_ID) {
@@ -1535,7 +1699,7 @@ client.once('ready', async () => {
       await client.application.commands.set(cmdDefs);
     }
 
-    console.log(`Registered ${cmdDefs.length} slash commands`);
+    console.log(`Registered ${cmdDefs.length} grouped slash commands`);
   } catch (e) { console.error('Slash command registration failed:', e); }
 });
 client.on('error', console.error);
@@ -1558,8 +1722,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
       if (!challenges[msg.id].members.includes(user.id)) {
         challenges[msg.id].members.push(user.id);
         try { await msg.channel.send(`<@${user.id}> joined the challenge: ${challenges[msg.id].name}`); } catch(e){}
-        // persist if file mapping exists
-        if (saveLoadMap.challenges) saveLoadMap.challenges[0]();
+        // persist challenge membership via storage
+        try { await saveChallenges(); } catch(e){ console.error('saveChallenges failed', e); }
       }
     }
   } catch (e) { console.error('reaction handler error:', e); }
@@ -1571,20 +1735,41 @@ process.on('unhandledRejection', (err) => { console.error('Unhandled Rejection:'
 client.on('interactionCreate', async (interaction) => {
   try {
     if (!interaction.isCommand?.()) return;
-    const name = interaction.commandName;
-    const handler = commandHandlers[name];
-    if (!handler) return interaction.reply({ content: 'Command handler not found for: ' + name, ephemeral: true });
 
-    const text = interaction.options.getString('text') || '';
+    // Support grouped commands: command name is the group (e.g., 'fitness'), subcommand is the actual action (e.g., 'track')
+    const group = interaction.commandName;
+    const sub = interaction.options.getSubcommand(false); // returns null if no subcommand
+
+    let handlerName = null;
+    let text = '';
+
+    if (sub) {
+      // If a subcommand exists, use that as the handler name
+      handlerName = sub;
+      text = interaction.options.getString('text') || '';
+    } else {
+      // Backwards compatibility: single-level commands might pass 'text' directly
+      // Try to find a handler that matches the group name
+      handlerName = group;
+      text = interaction.options.getString('text') || '';
+    }
+
+    const handler = commandHandlers[handlerName];
+    if (!handler) return interaction.reply({ content: 'Command handler not found for: ' + handlerName, ephemeral: true });
+
+    // enforce channel locks for interactions
+    if (!isCommandAllowedInChannel(handlerName, interaction.channel)) {
+      const allowed = commandChannelLock[handlerName];
+      return interaction.reply({ content: 'That command must be used in the `' + allowed + '` channel. Please try there.', ephemeral: true });
+    }
+
     const args = text.trim() ? text.trim().split(/ +/g) : [];
 
-    // Build a minimal message-like object the handlers expect
     const fakeMessage = {
       author: interaction.user,
       member: interaction.member,
       guild: interaction.guild,
       channel: interaction.channel,
-      // reply that supports fetchReply so some handlers can edit the reply
       reply: async (payload) => {
         const content = typeof payload === 'string' ? payload : (payload.content || JSON.stringify(payload));
         if (!interaction.replied && !interaction.deferred) return interaction.reply({ content, fetchReply: true });

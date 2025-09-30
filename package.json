@@ -2,9 +2,11 @@
   "name": "gymbotbro",
   "version": "1.0.0",
   "type": "module",
-  "main": "bot.js",
+  "main": "src/bot.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node src/bot.js",
+    "dev": "node --check src/bot.js && node src/bot.js",
+    "health:cli": "node ./tests/health-check.js"
   },
   "engines": {
     "node": "20.x"
@@ -18,6 +20,7 @@
     "googleapis": "^160.0.0",
     "newsapi": "^2.4.1",
     "node-cron": "^3.0.3",
+  "luxon": "^3.4.0",
     "openai": "^4.104.0",
     "mongodb": "^5.6.0"
   }

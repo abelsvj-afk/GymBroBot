@@ -1,0 +1,25 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "npm install",
+      "type": "shell",
+      "command": "npm install",
+      "group": "none",
+      "presentation": { "reveal": "always" }
+    },
+    {
+      "label": "Syntax Check: src/bot.js",
+      "type": "shell",
+      "command": "node --check \"${workspaceFolder}\\src\\bot.js\"",
+      "group": { "kind": "test", "isDefault": true }
+    },
+    {
+      "label": "Start Bot",
+      "type": "shell",
+      "command": "node \"${workspaceFolder}\\src\\bot.js\"",
+      "isBackground": true,
+      "presentation": { "reveal": "always" }
+    }
+  ]
+}
