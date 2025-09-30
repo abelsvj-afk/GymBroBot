@@ -2137,16 +2137,12 @@ client.on('interactionCreate', async (interaction) => {
     const group = interaction.commandName;
     const sub = interaction.options.getSubcommand(false); // returns null if no subcommand
 
-    let handlerName = group;
+    // Choose the handler: prefer the subcommand (module name) when present
+    const handlerName = sub || group;
+    // Build args: prefer explicit 'text' argument, then append other named options
     let args = [];
-
-    if (sub) {
-      // For subcommands, subcommand is the action
-      args.push(sub);
-    }
-
     const text = interaction.options.getString('text') || '';
-    args = args.concat(text.trim() ? text.trim().split(/ +/g) : []);
+    if (text.trim()) args = args.concat(text.trim().split(/ +/g));
 
     // For commands with named options, collect them
     for (const opt of interaction.options.data || []) {
