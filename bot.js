@@ -275,8 +275,8 @@ app.get('/admin/ai-health', async (req, res) => {
   const n = Math.min(200, parseInt(req.query.n) || 50);
   try {
     let entries = [];
-    if (mongoDb) {
-      entries = await mongoDb.collection('ai_health').find().sort({ ts: -1 }).limit(n).toArray();
+    if (storage && storage.mongoDb) {
+      entries = await storage.mongoDb.collection('ai_health').find().sort({ ts: -1 }).limit(n).toArray();
     } else {
       // fallback to in-memory / file store
       entries = aiHealth.slice(-n).reverse();
@@ -326,8 +326,8 @@ function recordAiHealthEvent(event) {
     if (aiHealth.length > 500) aiHealth = aiHealth.slice(-500);
     saveAiHealth();
     // also write to Mongo if available
-    if (mongoDb) {
-      try { mongoDb.collection('ai_health').insertOne(Object.assign({ ts: new Date() }, event)); } catch(e){console.error('mongo write failed',e);}
+    if (storage && storage.mongoDb) {
+      try { storage.mongoDb.collection('ai_health').insertOne(Object.assign({ ts: new Date() }, event)); } catch(e){console.error('mongo write failed',e);}
     }
   } catch (e) { console.error('recordAiHealthEvent error:', e); }
 }
@@ -1241,9 +1241,9 @@ const commandHandlers = {
 
     const n = Math.min(10, parseInt(args[0]) || 10);
     let entries = [];
-    if (mongoDb) {
+    if (storage && storage.mongoDb) {
       try {
-        entries = await mongoDb.collection('ai_health').find().sort({ ts: -1 }).limit(n).toArray();
+        entries = await storage.mongoDb.collection('ai_health').find().sort({ ts: -1 }).limit(n).toArray();
       } catch (e) { console.error('mongo read failed', e); }
     }
     if (!entries.length) entries = aiHealth.slice(-n).reverse();
@@ -1958,8 +1958,17 @@ async function updateHealthForGuild(context, guild) {
     // If we don't have a stored message, search pinned messages for our health embed
     if (!existingMessage) {
       try {
-  const pins = await ch.messages.fetchPins();
-        existingMessage = pins.find(m => m.author?.id === client.user.id && m.embeds?.[0]?.title?.includes('GymBotBro — Health Scan')) || null;
+        let pinsRaw;
+        try { pinsRaw = await ch.messages.fetchPins(); } catch (err) { pinsRaw = null; }
+        // Normalize various return shapes (Collection, Map, Array) into an array we can search
+        let pins = [];
+        if (pinsRaw) {
+          if (Array.isArray(pinsRaw)) pins = pinsRaw;
+          else if (typeof pinsRaw.find === 'function') pins = pinsRaw; // Collection-like
+          else if (pinsRaw.values && typeof pinsRaw.values === 'function') pins = Array.from(pinsRaw.values());
+          else pins = [];
+        }
+        existingMessage = (pins && typeof pins.find === 'function') ? pins.find(m => m.author?.id === client.user.id && m.embeds?.[0]?.title?.includes('GymBotBro — Health Scan')) || null : null;
       } catch (e) { existingMessage = null; }
     }
 
@@ -1996,7 +2005,7 @@ async function updateHealthForGuild(context, guild) {
           // Use a resilient lookup for admin channels. Some runtime edits may have
           // hoisted or moved findAdminChannels; fall back to an inline discovery
           // function if the named helper is not available.
-          const adminChs = (typeof findAdminChannels === 'function') ? await findAdminChannels(guild) : (async (g) => {
+          const adminChs = await (async (g) => {
             const channels = {};
             const lc = s => (s || '').toLowerCase();
             const byExact = name => g.channels.cache.find(ch => lc(ch.name) === name && ch.type === ChannelType.GuildText);
@@ -2272,7 +2281,7 @@ cron.schedule('*/10 * * * *', async () => {
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   client.user.setActivity("!help for commands");
-  loadAllData();
+  try { await loadAllData(); } catch (e) { console.error('loadAllData failed', e); }
   // Load optional command modules from src/commands (allows modular commands)
   await loadCommandModules();
   setInterval(() => tryAutoMatch(), 1000 * 30); // every 30s

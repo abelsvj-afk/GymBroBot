@@ -174,8 +174,17 @@ export default {
         const ch = guild.channels.cache.find(c => (c.name||'').toLowerCase() === 'gbb-health' && c.type === 0);
         if (ch) {
           // try to find an existing pinned health message
-          const pins = await ch.messages.fetchPins();
-          const existing = pins.find(m => m.author && m.author.id === context.client.user.id && m.embeds && m.embeds[0] && m.embeds[0].title && m.embeds[0].title.includes('GymBotBro — Health Scan'));
+          let pinsRaw;
+          try { pinsRaw = await ch.messages.fetchPins(); } catch (err) { pinsRaw = null; }
+          // Normalize various return shapes (Collection, Map, Array) into an array we can search
+          let pins = [];
+          if (pinsRaw) {
+            if (Array.isArray(pinsRaw)) pins = pinsRaw;
+            else if (typeof pinsRaw.find === 'function') pins = pinsRaw; // Collection-like
+            else if (pinsRaw.values && typeof pinsRaw.values === 'function') pins = Array.from(pinsRaw.values());
+            else pins = [];
+          }
+          const existing = (pins && typeof pins.find === 'function') ? pins.find(m => m.author && m.author.id === context.client.user.id && m.embeds && m.embeds[0] && m.embeds[0].title && m.embeds[0].title.includes('GymBotBro — Health Scan')) : null;
           if (existing) {
             await existing.edit({ embeds: [embed] });
             return message.reply('Updated the pinned health scan in #gbb-health');
