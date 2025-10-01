@@ -16,9 +16,15 @@ COPY . .
 # Expose port (Railway will set PORT env var)
 EXPOSE $PORT
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:$PORT/health || exit 1
+# Install curl and bash for health checks and startup script
+RUN apk add --no-cache curl bash
 
-# Start the bot
-CMD ["node", "bot.js"]
+# Make start script executable
+RUN chmod +x start.sh
+
+# Health check with proper port handling and longer startup time
+HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=5 \
+    CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
+
+# Start the bot using the startup script
+CMD ["./start.sh"]

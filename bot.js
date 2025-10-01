@@ -223,6 +223,40 @@ function loadData() { loadAllData(); }
 app.use(express.json());
 app.get('/', (req,res)=>res.json({ status:'GymBotBro running', uptime:process.uptime(), guilds:client.guilds.cache.size, users:client.users.cache.size }));
 
+// Health endpoint for Railway/Docker health checks
+app.get('/health', (req, res) => {
+  try {
+    const isFullyInitialized = globalThis.botInitialized === true;
+    const initStep = globalThis.initializationStep || 'starting';
+    
+    const healthStatus = {
+      status: isFullyInitialized ? 'healthy' : 'initializing',
+      initialized: isFullyInitialized,
+      initializationStep: initStep,
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      memory: {
+        used: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB`,
+        total: `${Math.round(process.memoryUsage().heapTotal / 1024 / 1024)}MB`
+      },
+      discord: client.isReady() ? 'connected' : 'connecting',
+      guilds: client.guilds?.cache?.size || 0,
+      commands: globalThis.commands?.size || 0,
+      personalities: globalThis.channelPersonalities ? 'active' : 'inactive'
+    };
+    
+    // Return 200 even during initialization, but 503 if there's an error
+    res.status(200).json(healthStatus);
+  } catch (error) {
+    res.status(503).json({ 
+      status: 'unhealthy', 
+      error: error.message,
+      timestamp: new Date().toISOString(),
+      initializationStep: globalThis.initializationStep || 'unknown'
+    });
+  }
+});
+
 // Start Express but be resilient to EADDRINUSE by trying the next few ports.
 async function startExpressServer(preferredPort = PORT, attempts = 5) {
   let port = preferredPort;
@@ -2219,11 +2253,21 @@ cron.schedule('*/10 * * * *', async () => {
   } catch (e) { console.error('temp role expiry cron failed', e); }
 });
 
+// Global initialization status for health checks
+globalThis.botInitialized = false;
+globalThis.initializationStep = 'starting';
+
 // ---------------- Bot Ready ----------------
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
+  globalThis.initializationStep = 'logged_in';
+  
   client.user.setActivity("!help for commands");
+  globalThis.initializationStep = 'loading_data';
+  
   try { await loadAllData(); } catch (e) { console.error('loadAllData failed', e); }
+  globalThis.initializationStep = 'loading_commands';
+  
   // Load optional command modules from src/commands (allows modular commands)
   await loadCommandModules();
   
@@ -2272,10 +2316,16 @@ client.once('ready', async () => {
 
   // --- Slash command registration: register slash commands from modules ---
   try {
+    globalThis.initializationStep = 'syncing_commands';
     // Attempt to auto-sync all module-defined slash commands
     await buildAndSyncSlashCommands();
     console.log('Attempted to synchronize module slash commands at startup');
   } catch (e) { console.error('Slash command registration failed:', e); }
+  
+  // Mark bot as fully initialized
+  globalThis.initializationStep = 'complete';
+  globalThis.botInitialized = true;
+  console.log('🚀 GymBroBot fully initialized and ready!');
 });
 client.on('error', console.error);
 
