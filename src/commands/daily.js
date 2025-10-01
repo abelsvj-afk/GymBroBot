@@ -1,5 +1,8 @@
 export default {
   name: 'daily',
+  description: 'Claim daily GymCoin reward',
+  exampleArgs: '',
+  notes: 'Use once per day to collect a small GymCoin bonus. Cooldowns and streaks may affect amount.',
   group: 'economy',
   slash: { group: 'economy', options: [] },
   async execute(context, message, args) {

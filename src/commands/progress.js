@@ -1,6 +1,17 @@
+const _GBB_g = globalThis;
+const adminLog = _GBB_g.adminLog || (async () => {});
+const awardAchievement = _GBB_g.awardAchievement || (async () => false);
+const getOpenAIResponse = _GBB_g.getOpenAIResponse || (async () => '');
+const validateModel = _GBB_g.validateModel || (async () => ({ ok: false }));
+const saveWeekly = _GBB_g.saveWeekly || (async () => {});
+const saveHabits = _GBB_g.saveHabits || (async () => {});
+const saveMemory = _GBB_g.saveMemory || (async () => {});
+
 export default {
   name: 'progress',
   description: 'Show weekly progress',
+  exampleArgs: '',
+  notes: 'Displays your workouts this week and success rate. Use to check personal stats.',
   group: 'fitness',
   slash: { type: 'subcommand' },
   execute: async (context, message, args) => {

@@ -1,5 +1,8 @@
 export default {
   name: 'streakroles',
+  description: 'Manage roles granted for streak milestones',
+  notes: 'Admin-only: configure which roles are given when users reach streak thresholds.',
+  exampleArgs: '',
   group: 'economy',
   slash: { group: 'economy', options: [] },
   async execute(context, message, args) {

@@ -1,6 +1,8 @@
 export default {
   name: 'quote',
   description: 'Random motivational quote',
+  exampleArgs: '',
+  notes: 'Returns a short motivation quote to encourage members.',
   group: 'coach',
   slash: { type: 'subcommand' },
   execute: async (context, message, args) => {

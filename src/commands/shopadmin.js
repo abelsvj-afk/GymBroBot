@@ -1,5 +1,7 @@
 export default {
   name: 'shopadmin',
+  description: 'Admin tools for managing the shop',
+  notes: 'Admin-only: add/remove items or adjust prices. Use with care.',
   group: 'economy',
   slash: { group: 'economy', options: [] },
   async execute(context, message, args) {

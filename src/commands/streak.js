@@ -1,5 +1,7 @@
 export default {
   name: 'streak',
+  description: 'Show your workout streak',
+  notes: 'Shows how many consecutive workouts you have logged.',
   group: 'economy',
   slash: { group: 'economy', options: [] },
   async execute(context, message, args) {

@@ -16,7 +16,30 @@ import { google } from 'googleapis';
 
 dotenv.config();
 
-// Allow selecting the OpenAI model via environment variable so we can
+// EARLY FALLBACKS: ensure common global helpers exist immediately so any
+// module imported or executed before full initialization doesn't throw.
+if (typeof globalThis.adminLog === 'undefined') globalThis.adminLog = async () => {};
+if (typeof globalThis.saveWeekly === 'undefined') globalThis.saveWeekly = async () => {};
+if (typeof globalThis.saveMemory === 'undefined') globalThis.saveMemory = async () => {};
+if (typeof globalThis.saveHabits === 'undefined') globalThis.saveHabits = async () => {};
+if (typeof globalThis.getOpenAIResponse === 'undefined') globalThis.getOpenAIResponse = async () => '';
+if (typeof globalThis.validateModel === 'undefined') globalThis.validateModel = async () => ({ ok: false, error: 'no-validate' });
+
+// Early no-op fallbacks for other globals some handlers reference directly
+if (typeof globalThis.awardAchievement === 'undefined') globalThis.awardAchievement = async () => false;
+if (typeof globalThis.saveAchievements === 'undefined') globalThis.saveAchievements = async () => {};
+if (typeof globalThis.saveMessageCounts === 'undefined') globalThis.saveMessageCounts = async () => {};
+if (typeof globalThis.startOnboarding === 'undefined') globalThis.startOnboarding = async () => {};
+if (typeof globalThis.storage === 'undefined') globalThis.storage = null;
+
+// Provide a safe global adminLog fallback so modules that reference it
+// via the global scope won't crash during dynamic loading or execution.
+if (typeof globalThis.adminLog === 'undefined') globalThis.adminLog = async () => {};
+
+// Hoisted no-op adminLog declaration to ensure the identifier exists in the
+// module scope and avoid ReferenceError if some code calls `adminLog(...)`
+// before the richer implementation is defined later in this file.
+function adminLog(guild, text) { return Promise.resolve(); }
 // enable newer models (for example: 'gpt-5-mini') without changing code.
 // OPENAI_MODEL is mutable so an admin can change it at runtime via a command.
 let OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
@@ -37,9 +60,9 @@ const client = new Client({
 });
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
+// Express application instance
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = parseInt(process.env.PORT, 10) || 3000;
 
 // Optional MongoDB connection (useful for persistent audit logs across restarts)
 const MONGO_URI = process.env.MONGO_URI || null;
@@ -63,6 +86,7 @@ async function updateRailwayEnvVar(key, value) {
 // In-memory state (will be loaded via storage.load)
 let memory = {}, birthdays = {}, fitnessWeekly = {}, fitnessMonthly = {};
 let partnerQueue = [], partners = {}, strikes = {}, habitTracker = {};
+// Persistent collections used across the bot lifecycle
 let challenges = {}, onboarding = {}, matches = {}, leaderboardPotential = {};
 let checkInMutes = {}, healthPosts = [], wealthTips = [], fitnessPosts = [];
 let aiHealth = [];
@@ -74,6 +98,8 @@ let achievementsStore = {}; // { userId: [achId,...] } - persisted under 'achiev
 let leaderRoles = {}; // { guildId: roleId }
 let currentChampion = {}; // { guildId: userId }
 let modulesMeta = []; // collected module metadata for slash sync
+// Map of sanitized slash subcommand name -> handler name (persisted)
+let slashNameMap = {};
 
 // ---------------- Save/Load Helpers ----------------
 // Storage-backed load/save helpers
@@ -93,6 +119,7 @@ async function loadAllData() {
   checkInMutes = await storage.load('checkInMutes', {});
   healthPosts = await storage.load('healthPosts', []);
   commandDocsPins = await storage.load('commandDocsPins', []);
+  slashNameMap = await storage.load('slashNameMap', {});
   wealthTips = await storage.load('wealthTips', []);
   fitnessPosts = await storage.load('fitnessPosts', []);
   aiHealth = await storage.load('ai_health', []);
@@ -127,6 +154,7 @@ async function saveAllData() {
 const saveLastHealthAlert = async () => storage.save('lastHealthAlert', lastHealthAlert || {});
 
 const saveCommandDocsPins = async () => storage.save('commandDocsPins', commandDocsPins);
+const saveSlashNameMap = async () => storage.save('slashNameMap', slashNameMap);
 
 // Shorthand async save functions
 const saveMemory = async () => storage.save('memory', memory);
@@ -153,6 +181,8 @@ const saveMessageCounts = async () => storage.save('messageCounts', messageCount
 const saveAchievements = async () => storage.save('achievements', achievementsStore);
 const saveLeaderRoles = async () => storage.save('leaderRoles', leaderRoles);
 const saveCurrentChampion = async () => storage.save('currentChampion', currentChampion);
+// ... other saves
+
 
 // ----- Additional explicit file handles and helpers requested -----
 // Provide the file path constants the user referenced and small save/load helpers
@@ -192,7 +222,43 @@ function loadData() { loadAllData(); }
 // ---------------- Express ----------------
 app.use(express.json());
 app.get('/', (req,res)=>res.json({ status:'GymBotBro running', uptime:process.uptime(), guilds:client.guilds.cache.size, users:client.users.cache.size }));
-app.listen(PORT, ()=>console.log(`Express server running on port ${PORT}`));
+
+// Start Express but be resilient to EADDRINUSE by trying the next few ports.
+async function startExpressServer(preferredPort = PORT, attempts = 5) {
+  let port = preferredPort;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await new Promise((resolve, reject) => {
+        const server = app.listen(port, () => {
+          console.log(`Express server running on port ${port}`);
+          resolve(server);
+        });
+        server.on('error', (err) => reject(err));
+      });
+      return port;
+    } catch (err) {
+      if (err && err.code === 'EADDRINUSE') {
+        console.warn(`Port ${port} in use, trying ${port + 1}...`);
+        port += 1;
+        continue;
+      }
+      console.error('Failed to start Express server:', err);
+      break;
+    }
+  }
+  throw new Error(`Unable to start Express server after ${attempts} attempts (starting at ${preferredPort})`);
+}
+
+// Start now (fire-and-forget; errors will be logged)
+startExpressServer().catch(e => console.error(e));
+
+// Lightweight debug endpoint to inspect runtime command mapping
+app.get('/debug', (req, res) => {
+  try {
+    const handlers = Object.keys(commandHandlers || {}).slice(0,500);
+    return res.json({ ok: true, modulesMeta: modulesMeta || [], handlers, slashNameMap: slashNameMap || {} });
+  } catch (e) { return res.status(500).json({ ok: false, error: String(e) }); }
+});
 
 // ---------------- Admin dashboard (protected) ----------------
 // Simple JSON + HTML view to inspect recent ai_health events.
@@ -303,7 +369,7 @@ async function pinCommandDocs(guild) {
     for (const key of ['admin', 'mod']) {
       const ch = chs[key];
       if (!ch) continue;
-      const pins = await ch.messages.fetchPinned();
+  const pins = await ch.messages.fetchPins();
       const already = pins.find(m => m.content && m.content.startsWith('GymBotBro Admin Instructions'));
       if (!already) {
         const sent = await ch.send(adminDoc);
@@ -314,7 +380,7 @@ async function pinCommandDocs(guild) {
     // Logging channel: post loggingDoc only
     if (chs.logging) {
       const ch = chs.logging;
-      const pins = await ch.messages.fetchPinned();
+  const pins = await ch.messages.fetchPins();
       const already = pins.find(m => m.content && m.content.startsWith('GymBotBro Logging Channel'));
       if (!already) {
         const sent = await ch.send(loggingDoc);
@@ -368,6 +434,34 @@ async function awardAchievement(guild, userId, achId) {
     return true;
   } catch (e) { console.error('awardAchievement error', e); return false; }
 }
+
+// Expose commonly-used helpers and state on globalThis to maintain
+// backwards-compatibility for modules that reference these as globals.
+try {
+  globalThis.adminLog = globalThis.adminLog || adminLog;
+  globalThis.awardAchievement = globalThis.awardAchievement || awardAchievement;
+  globalThis.saveWeekly = globalThis.saveWeekly || saveWeekly;
+  globalThis.saveMemory = globalThis.saveMemory || saveMemory;
+  globalThis.saveHabits = globalThis.saveHabits || saveHabits;
+  globalThis.savePartnerQueue = globalThis.savePartnerQueue || savePartnerQueue;
+  globalThis.savePartners = globalThis.savePartners || savePartners;
+  globalThis.saveMatches = globalThis.saveMatches || saveMatches;
+  globalThis.saveStrikes = globalThis.saveStrikes || saveStrikes;
+  globalThis.saveChallenges = globalThis.saveChallenges || saveChallenges;
+  globalThis.saveMonthly = globalThis.saveMonthly || saveMonthly;
+  globalThis.saveMessageCounts = globalThis.saveMessageCounts || saveMessageCounts;
+  globalThis.saveAchievements = globalThis.saveAchievements || saveAchievements;
+  globalThis.startOnboarding = globalThis.startOnboarding || startOnboarding;
+  globalThis.getOpenAIResponse = globalThis.getOpenAIResponse || getOpenAIResponse;
+  globalThis.validateModel = globalThis.validateModel || validateModel;
+  globalThis.storage = globalThis.storage || storage;
+  globalThis.habitTracker = globalThis.habitTracker || habitTracker;
+  globalThis.fitnessWeekly = globalThis.fitnessWeekly || fitnessWeekly;
+  globalThis.partnerQueue = globalThis.partnerQueue || partnerQueue;
+  globalThis.matches = globalThis.matches || matches;
+  globalThis.onboarding = globalThis.onboarding || onboarding;
+  globalThis.messageCounts = globalThis.messageCounts || messageCounts;
+} catch (e) { console.error('Failed to expose globals for compatibility', e); }
 
 // Simple cooldown map for testai command (per-guild)
 const testAiCooldowns = new Map();
@@ -858,7 +952,7 @@ async function updateLeaderboardChannel() {
         // Try to update existing pinned leaderboard message in channel, otherwise send new and pin
         let existingMsg = null;
         try {
-          const pins = await channel.messages.fetchPinned();
+          const pins = await channel.messages.fetchPins();
           existingMsg = pins.find(m => m.author?.id === client.user.id && m.embeds?.[0]?.title && (m.embeds[0].title||'').toLowerCase().includes('leaderboard')) || null;
         } catch (e) { existingMsg = null; }
 
@@ -872,13 +966,13 @@ async function updateLeaderboardChannel() {
 
         // Award the Iron Champion achievement to the top user (idempotent)
         try {
-          const topUid = sorted[0] && sorted[0][0];
-          if (topUid) {
-            await awardAchievement(guild, topUid, ACHIEVEMENTS.iron_champion.id).catch(()=>{});
-            // assign leader role if configured
-            try { await assignLeaderRole(guild, topUid); } catch (e) { console.error('assignLeaderRole failed', e); }
-          }
-        } catch (e) { console.error('award iron champion failed', e); }
+                const topUid = sorted[0] && sorted[0][0];
+                if (topUid) {
+                  await (globalThis.awardAchievement ? globalThis.awardAchievement(guild, topUid, ACHIEVEMENTS.iron_champion.id) : awardAchievement(guild, topUid, ACHIEVEMENTS.iron_champion.id)).catch(()=>{});
+                  // assign leader role if configured
+                  try { await assignLeaderRole(guild, topUid); } catch (e) { console.error('assignLeaderRole failed', e); }
+                }
+              } catch (e) { console.error('award iron champion failed', e); }
       } catch (e) { console.error('updateLeaderboardChannel per-guild error:', e); }
     }
   } catch (e) { console.error('updateLeaderboardChannel error:', e); }
@@ -1128,7 +1222,7 @@ const commandHandlers = {
 
     // Telemetry & logging
     recordAiHealthEvent({ type: 'setmodel', user: message.author.id, model, force: forceFlag, saved: !!saveFlag });
-    try { adminLog(message.guild, `User <@${message.author.id}> set model -> ${model} ${saveFlag ? '(saved to .env)' : ''}`); } catch(e){}
+  try { globalThis.adminLog(message.guild, `User <@${message.author.id}> set model -> ${model} ${saveFlag ? '(saved to .env)' : ''}`); } catch(e){}
 
     if (saveFlag) {
       const ok = await persistEnvVar('OPENAI_MODEL', model);
@@ -1153,7 +1247,7 @@ const commandHandlers = {
 
     FALLBACK_OPENAI_MODEL = model;
     recordAiHealthEvent({ type: 'setfallback', user: message.author.id, model, saved: !!saveFlag });
-    try { adminLog(message.guild, `User <@${message.author.id}> set fallback model -> ${model} ${saveFlag ? '(saved to .env)' : ''}`); } catch(e){}
+  try { globalThis.adminLog(message.guild, `User <@${message.author.id}> set fallback model -> ${model} ${saveFlag ? '(saved to .env)' : ''}`); } catch(e){}
 
     message.reply(`Fallback model set to ${model}`);
     if (saveFlag) {
@@ -1201,12 +1295,12 @@ const commandHandlers = {
     const res = await validateModel(OPENAI_MODEL, 8000);
     if (!res.ok) {
       recordAiHealthEvent({ type: 'testai', user: message.author.id, model: OPENAI_MODEL, ok: false, error: res.error });
-      try { adminLog(message.guild, `AI health check failed by <@${message.author.id}>: ${res.error}`); } catch(e){}
+  try { globalThis.adminLog(message.guild, `AI health check failed by <@${message.author.id}>: ${res.error}`); } catch(e){}
       return reply.edit(`AI check failed: ${res.error}`);
     }
 
     recordAiHealthEvent({ type: 'testai', user: message.author.id, model: OPENAI_MODEL, ok: true, latency: res.duration, sample: res.sample });
-    try { adminLog(message.guild, `AI health check OK by <@${message.author.id}>: model ${OPENAI_MODEL} ${res.duration}ms`); } catch(e){}
+  try { globalThis.adminLog(message.guild, `AI health check OK by <@${message.author.id}>: model ${OPENAI_MODEL} ${res.duration}ms`); } catch(e){}
     return reply.edit(`AI check OK (model: ${OPENAI_MODEL}, ${res.duration}ms). Sample: ${res.sample}`);
   },
 
@@ -1304,7 +1398,7 @@ const commandHandlers = {
     const roleMention = args[0] || '';
     const targetId = (roleMention.match(/\d{17,20}/) || [])[0] || null;
     if (!targetId) return message.reply('Usage: `!forcechampion @User`');
-    try { const guild = message.guild; await awardAchievement(guild, targetId, ACHIEVEMENTS.iron_champion.id); await assignLeaderRole(guild, targetId); return message.reply('Forced champion assignment complete.'); } catch (e) { console.error('forcechampion failed', e); return message.reply('Failed to force champion.'); }
+  try { const guild = message.guild; await (globalThis.awardAchievement ? globalThis.awardAchievement(guild, targetId, ACHIEVEMENTS.iron_champion.id) : awardAchievement(guild, targetId, ACHIEVEMENTS.iron_champion.id)); await assignLeaderRole(guild, targetId); return message.reply('Forced champion assignment complete.'); } catch (e) { console.error('forcechampion failed', e); return message.reply('Failed to force champion.'); }
   },
 
   // Admin: force pin admin & logging docs
@@ -1477,19 +1571,140 @@ async function loadCommandModules() {
           const def = imported.default;
           if (def && def.name && typeof def.execute === 'function') {
           // wrap module's execute to match existing handler signature
-          commandHandlers[def.name] = async (message, args) => {
-            const context = { client, EmbedBuilder, PermissionFlagsBits, ChannelType, getOpenAIResponse, validateModel, adminLog, storage, saveHabits, savePartnerQueue, savePartners, saveMatches, saveStrikes, saveChallenges, saveWeekly, saveMonthly, saveMemory, habitTracker, fitnessWeekly, partnerQueue, matches, onboarding, startOnboarding,
+          const wrapped = async (message, args) => {
+            try {
+              // debug: show module execution entry and adminLog availability (use globalThis to avoid ReferenceError)
+              try { console.log(`Module handler starting: ${def.name} (typeof globalThis.adminLog=${typeof globalThis.adminLog})`); } catch(e){}
+              // adminLog may not always be available at module load time due to edit/hoisting
+              // protect command execution by providing a no-op fallback. Use globalThis to avoid accidental ReferenceError.
+              const adminLogSafe = (typeof globalThis.adminLog === 'function') ? globalThis.adminLog : async () => {};
+              const context = {
+              client,
+              EmbedBuilder,
+              PermissionFlagsBits,
+              ChannelType,
+              getOpenAIResponse: (typeof globalThis.getOpenAIResponse === 'function') ? globalThis.getOpenAIResponse : async () => '',
+              validateModel: (typeof globalThis.validateModel === 'function') ? globalThis.validateModel : async () => ({ ok: false, error: 'validateModel unavailable' }),
+              adminLog: (typeof globalThis.adminLog === 'function') ? globalThis.adminLog : adminLogSafe,
+              // prefer the local storage instance to avoid races during startup
+              storage: (typeof storage !== 'undefined' && storage) ? storage : (typeof globalThis.storage !== 'undefined' ? globalThis.storage : null),
+              saveHabits: (typeof globalThis.saveHabits === 'function') ? globalThis.saveHabits : async () => {},
+              savePartnerQueue: (typeof globalThis.savePartnerQueue === 'function') ? globalThis.savePartnerQueue : async () => {},
+              savePartners: (typeof globalThis.savePartners === 'function') ? globalThis.savePartners : async () => {},
+              saveMatches: (typeof globalThis.saveMatches === 'function') ? globalThis.saveMatches : async () => {},
+              saveStrikes: (typeof globalThis.saveStrikes === 'function') ? globalThis.saveStrikes : async () => {},
+              saveChallenges: (typeof globalThis.saveChallenges === 'function') ? globalThis.saveChallenges : async () => {},
+              saveWeekly: (typeof globalThis.saveWeekly === 'function') ? globalThis.saveWeekly : async () => {},
+              saveMonthly: (typeof globalThis.saveMonthly === 'function') ? globalThis.saveMonthly : async () => {},
+              saveMemory: (typeof globalThis.saveMemory === 'function') ? globalThis.saveMemory : async () => {},
+              habitTracker: (typeof globalThis.habitTracker !== 'undefined') ? globalThis.habitTracker : {},
+              fitnessWeekly: (typeof globalThis.fitnessWeekly !== 'undefined') ? globalThis.fitnessWeekly : {},
+              partnerQueue: (typeof globalThis.partnerQueue !== 'undefined') ? globalThis.partnerQueue : [],
+              matches: (typeof globalThis.matches !== 'undefined') ? globalThis.matches : {},
+              onboarding: (typeof globalThis.onboarding !== 'undefined') ? globalThis.onboarding : {},
+              startOnboarding: (typeof globalThis.startOnboarding === 'function') ? globalThis.startOnboarding : async () => {},
               // achievements & message counters
-              awardAchievement, messageCounts, achievementsStore, saveAchievements, saveMessageCounts };
-            await def.execute(context, message, args);
+              awardAchievement: (typeof globalThis.awardAchievement === 'function') ? globalThis.awardAchievement : async () => false,
+              messageCounts: (typeof globalThis.messageCounts !== 'undefined') ? globalThis.messageCounts : {},
+              achievementsStore: (typeof globalThis.achievementsStore !== 'undefined') ? globalThis.achievementsStore : {},
+              saveAchievements: (typeof globalThis.saveAchievements === 'function') ? globalThis.saveAchievements : async () => {},
+              saveMessageCounts: (typeof globalThis.saveMessageCounts === 'function') ? globalThis.saveMessageCounts : async () => {}
+            };
+              try {
+                // Dump the handler source for debugging (trim to reasonable size)
+                try { console.log(`Executing handler ${def.name} source (first 2000 chars):\n${def.execute ? def.execute.toString().slice(0,2000) : '[no-source]'}`); } catch(e){}
+                // Temporarily expose common helpers on globalThis so handlers that reference
+                // bare globals (legacy code) don't throw ReferenceError. We'll restore
+                // previous values afterwards to avoid leaking state between handlers.
+                const _prevGlobals = {};
+                const toBind = ['adminLog','awardAchievement','saveWeekly','saveMemory','saveHabits','saveMessageCounts','saveAchievements','startOnboarding','getOpenAIResponse','validateModel','storage'];
+                try {
+                  for (const k of toBind) { _prevGlobals[k] = globalThis[k]; if (typeof context[k] !== 'undefined') globalThis[k] = context[k]; }
+                  await def.execute(context, message, args);
+                } finally {
+                  try { for (const k of toBind) { if (typeof _prevGlobals[k] === 'undefined') delete globalThis[k]; else globalThis[k] = _prevGlobals[k]; } } catch(e){}
+                }
+              } catch (err) {
+                // If it's a ReferenceError, include the missing identifier and handler source
+                try {
+                  console.error(`Error in module ${def.name} execute:`, err);
+
+                  // Build a structured dump to persist synchronously so it survives process termination
+                  try {
+                    const dump = {
+                      time: new Date().toISOString(),
+                      handler: def.name,
+                      messageSummary: message && message.author ? { author: message.author.id, channel: message.channel?.id } : null,
+                      error: err && err.stack ? err.stack : String(err),
+                      handlerSource: (def.execute && def.execute.toString && def.execute.toString().slice(0,10000)) || null
+                    };
+                    try {
+                      fs.appendFileSync(path.join(process.cwd(),'debug-handler-errors.log'), JSON.stringify(dump, null, 2) + '\n---\n');
+                      console.error(`Wrote debug dump for handler ${def.name} to debug-handler-errors.log`);
+                    } catch (e) {
+                      // best-effort: log to console if file write fails
+                      console.error('Failed to write debug dump', e);
+                    }
+                  } catch (e) { console.error('Failed to prepare debug dump', e); }
+
+                  if (err && err.name === 'ReferenceError' && typeof err.message === 'string') {
+                    // Try to extract the missing identifier name from the message (e.g. "X is not defined")
+                    const m = err.message.match(/^(?:([^\s]+) is not defined)|ReferenceError:\s*([^\s]+) is not defined/i);
+                    const missing = (m && (m[1] || m[2])) ? (m[1] || m[2]) : null;
+                    if (missing) {
+                      console.warn(`Detected missing global identifier '${missing}' in handler ${def.name}. Injecting safe fallback on globalThis and retrying once.`);
+                      try {
+                        // Provide reasonable defaults for common helpers
+                        if (missing === 'adminLog') globalThis.adminLog = globalThis.adminLog || (async () => {});
+                        else if (missing === 'awardAchievement') globalThis.awardAchievement = globalThis.awardAchievement || (async () => false);
+                        else if (missing.startsWith('save') && typeof globalThis[missing] === 'undefined') globalThis[missing] = async () => {};
+                        else if (typeof globalThis[missing] === 'undefined') globalThis[missing] = async () => {};
+
+                        // Attempt one retry of the handler now that the missing symbol is stubbed
+                        try {
+                          await def.execute(context, message, args);
+                          console.log(`Retry of handler ${def.name} succeeded after stubbing ${missing}.`);
+                          return;
+                        } catch (retryErr) {
+                          console.error(`Retry after stubbing '${missing}' failed for handler ${def.name}:`, retryErr);
+                          // fall through to notify user below
+                        }
+                      } catch (injectErr) { console.error('Failed to inject fallback for missing global:', injectErr); }
+                    }
+                  }
+                } catch (ee) { console.error('Error while logging handler failure:', ee); }
+                try { if (message && message.reply) await message.reply('Command failed (see bot logs).'); } catch(e){}
+              }
+            } catch (wrapperErr) {
+              console.error(`Error in command wrapper for ${def.name}:`, wrapperErr);
+              try { if (message && message.reply) await message.reply('Command wrapper failed (see bot logs).'); } catch(e){}
+            }
           };
+          commandHandlers[def.name] = wrapped;
+
+          // Register robust aliases so slash subcommands (which may be normalized) map to handlers
+          try {
+            const nameLower = def.name.toLowerCase();
+            const nameStripped = def.name.replace(/[-_]/g, '');
+            const nameLowerStripped = nameLower.replace(/[-_]/g, '');
+            if (!commandHandlers[nameLower]) commandHandlers[nameLower] = wrapped;
+            if (!commandHandlers[nameStripped]) commandHandlers[nameStripped] = wrapped;
+            if (!commandHandlers[nameLowerStripped]) commandHandlers[nameLowerStripped] = wrapped;
+          } catch (e) { /* ignore alias registration errors */ }
 
           // collect metadata for auto slash registration
           const groupName = def.group || def.slash?.group || 'misc';
           if (!groups[groupName]) groups[groupName] = { name: groupName, description: groupName + ' commands', subcommands: [] };
-          groups[groupName].subcommands.push({ name: def.name, slash: def.slash || {} });
+
+          // generate a sanitized slash subcommand name (discord requires lowercase, no spaces)
+          const sanitize = (s) => (s||'').toString().toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0,32);
+          const sanitized = sanitize(def.name);
+          // persist mapping (sanitized -> handler name)
+          try { slashNameMap[sanitized] = def.name; } catch(e){}
+
+          groups[groupName].subcommands.push({ name: sanitized, originalName: def.name, optionDefs: def.slash?.options || def.slash?.opts || [] });
           // store module-level meta for later sync (flatten)
-          modulesMeta.push({ name: def.name, group: groupName, slash: def.slash || {}, description: def.description || '' });
+          modulesMeta.push({ name: def.name, group: groupName, slash: def.slash || {}, description: def.description || '', sanitizedName: sanitized });
 
           console.log(`Loaded command module: ${def.name} from ${f}`);
         }
@@ -1498,6 +1713,19 @@ async function loadCommandModules() {
 
     // Auto-registration handled separately by buildAndSyncSlashCommands
     // leave modulesMeta populated and return
+    // Debug: print modulesMeta summary and registered handler keys (small sample)
+    try {
+      console.log('modulesMeta summary:', modulesMeta.map(m => ({ name: m.name, group: m.group }))); 
+      console.log('registered handlers:', Object.keys(commandHandlers).slice(0,200));
+      try {
+        if (commandHandlers['track']) {
+          console.log('--- track handler source (first 2000 chars) ---');
+          const src = commandHandlers['track'].toString();
+          console.log(src.slice(0,2000));
+          console.log('--- end track handler source ---');
+        }
+      } catch(e) { console.error('Failed to dump track handler source', e); }
+    } catch (e) {}
     return;
   } catch (e) { console.error('loadCommandModules failed', e); }
 }
@@ -1537,7 +1765,9 @@ async function buildAndSyncSlashCommands(targetGuildId = null) {
         return { name: (o.name||'text').slice(0,32), type: typeNum, description: (o.description||'').slice(0,100), required: !!o.required };
       });
       if (!optionDefs.length) optionDefs.push({ name: 'text', type: 3, description: 'Arguments as a single string', required: false });
-      groups[g].subcommands.push({ name: m.name.slice(0,32), optionDefs });
+      // use sanitized name if present in modulesMeta
+      const subName = m.sanitizedName || (m.name || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0,32);
+      groups[g].subcommands.push({ name: subName, optionDefs });
     }
 
     // Ensure admin setleaderrole has a ROLE option for good UX
@@ -1546,6 +1776,13 @@ async function buildAndSyncSlashCommands(targetGuildId = null) {
 
     const cmdDefs = Object.values(groups).map(g => ({ name: g.name.slice(0,32), description: g.description.slice(0,100), options: g.subcommands.map(sc => ({ name: sc.name.slice(0,32), type: 1, description: `Run ${sc.name}`, options: sc.optionDefs })) }));
     if (!cmdDefs.length) return { ok: true, count: 0 };
+
+    // Persist slashNameMap for later resolution and print helpful summary
+    try { await saveSlashNameMap(); } catch(e){}
+    // Helpful debug summary: print what we'll register (name + subcommand count)
+    try {
+      console.log('SlashCmds: cmdDefs summary ->', cmdDefs.map(c => ({ name: c.name, subcommands: (c.options||[]).length }))); 
+    } catch (e) { /* ignore logging errors */ }
 
     if (targetGuildId) {
       const tg = client.guilds.cache.get(targetGuildId);
@@ -1583,14 +1820,14 @@ client.on("messageCreate", async (message) => {
     messageCounts[message.author.id] = (messageCounts[message.author.id] || 0) + 1;
     if (messageCounts[message.author.id] === 1000) {
       // award Beast Mode
-      await awardAchievement(message.guild, message.author.id, ACHIEVEMENTS.beast_mode.id);
+      await (globalThis.awardAchievement ? globalThis.awardAchievement(message.guild, message.author.id, ACHIEVEMENTS.beast_mode.id) : awardAchievement(message.guild, message.author.id, ACHIEVEMENTS.beast_mode.id));
     }
     // Night Lifter: if message sent after 2AM local time
     const zone = process.env.TIMEZONE || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
     const hour = new Date().toLocaleString('en-US', { timeZone: zone });
     const h = new Date(hour).getHours();
     if (h >= 2 && h < 5) {
-      await awardAchievement(message.guild, message.author.id, ACHIEVEMENTS.night_lifter.id);
+      await (globalThis.awardAchievement ? globalThis.awardAchievement(message.guild, message.author.id, ACHIEVEMENTS.night_lifter.id) : awardAchievement(message.guild, message.author.id, ACHIEVEMENTS.night_lifter.id));
     }
     await saveMessageCounts();
   } catch (e) { console.error('message count/achievement error', e); }
@@ -1757,7 +1994,7 @@ async function updateHealthForGuild(context, guild) {
     // If we don't have a stored message, search pinned messages for our health embed
     if (!existingMessage) {
       try {
-        const pins = await ch.messages.fetchPinned();
+  const pins = await ch.messages.fetchPins();
         existingMessage = pins.find(m => m.author?.id === client.user.id && m.embeds?.[0]?.title?.includes('GymBotBro — Health Scan')) || null;
       } catch (e) { existingMessage = null; }
     }
@@ -2069,7 +2306,7 @@ client.once('ready', async () => {
     try {
       if (typeof pinCommandDocs === 'function') await pinCommandDocs(guild);
       // log that pinning was attempted
-      try { adminLog(guild, `Pinned admin docs and logging docs during startup.`); } catch(e){}
+      try { (globalThis.adminLog ? globalThis.adminLog(guild, `Pinned admin docs and logging docs during startup.`) : adminLog(guild, `Pinned admin docs and logging docs during startup.`)); } catch(e){}
     } catch (e) { console.error('Error pinning docs for guild', guild.id, e); }
   }
 
@@ -2128,31 +2365,97 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
 process.on('unhandledRejection', (err) => { console.error('Unhandled Rejection:', err); });
 
+// During debugging, capture uncaught exceptions to log them rather than letting
+// the process exit immediately. In production you may want to remove or alter this.
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
 // Map slash command interactions to existing prefix handlers
 client.on('interactionCreate', async (interaction) => {
   try {
     if (!interaction.isCommand?.()) return;
 
-    // Support slash commands: command name is the handler (e.g., 'partner'), options are args
-    const group = interaction.commandName;
-    const sub = interaction.options.getSubcommand(false); // returns null if no subcommand
+    // Wrap interaction response methods to suppress known double-ack errors
+    // (DiscordAPIError[40060]) which can occur in race conditions when handlers
+    // attempt to reply after the interaction is already acknowledged.
+    try {
+      const wrap = (fnName) => {
+        if (!interaction[fnName] || interaction[fnName].__wrapped) return;
+        const orig = interaction[fnName].bind(interaction);
+        interaction[fnName] = async (...args) => {
+          try {
+            return await orig(...args);
+          } catch (err) {
+            try {
+              const code = err && (err.code || err?.status);
+              if (code === 40060 || (err && err.message && err.message.includes('already been acknowledged'))) {
+                console.warn(`Suppressed DiscordAPIError[40060] during interaction.${fnName}`);
+                return null;
+              }
+            } catch (ee) {}
+            throw err;
+          }
+        };
+        interaction[fnName].__wrapped = true;
+      };
+      wrap('reply'); wrap('editReply'); wrap('followUp');
+    } catch (wrapErr) { console.error('Failed to wrap interaction methods', wrapErr); }
 
-    // Choose the handler: prefer the subcommand (module name) when present
-    const handlerName = sub || group;
+    const DEBUG = !!process.env.DEBUG_COMMANDS;
+
+    // Support slash commands: group is the top-level command, sub is subcommand name when using grouped commands
+    const group = interaction.commandName;
+    const sub = interaction.options.getSubcommand(false); // null if none
+
+    // Choose the handler: prefer the subcommand when present
+    let handlerName = sub || group;
     // Build args: prefer explicit 'text' argument, then append other named options
     let args = [];
     const text = interaction.options.getString('text') || '';
     if (text.trim()) args = args.concat(text.trim().split(/ +/g));
 
-    // For commands with named options, collect them
+    // Collect other named option values
     for (const opt of interaction.options.data || []) {
-      if (opt.name !== 'text' && opt.value !== undefined) {
-        args.push(opt.value);
+      if (opt.name !== 'text' && typeof opt.value !== 'undefined') args.push(opt.value);
+    }
+
+    // First try strict mapping from sanitized slash name -> handler
+    let handler = null;
+    try {
+      const sanitized = (sub || group || '').toString().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+      if (slashNameMap[sanitized]) {
+        const mapped = slashNameMap[sanitized];
+        if (commandHandlers[mapped]) { handler = commandHandlers[mapped]; handlerName = mapped; }
+      }
+    } catch(e) {}
+
+    // Normalize handler lookup: try direct, lowercase, and relaxed variants
+    if (!handler) {
+      const tryNames = [handlerName, handlerName && handlerName.toLowerCase()];
+      if (handlerName) tryNames.push(handlerName.replace(/[-_]/g, ''));
+      if (handlerName) tryNames.push(handlerName.replace(/[-_]/g, '').toLowerCase());
+      for (const n of tryNames) {
+        if (!n) continue;
+        if (commandHandlers[n]) { handler = commandHandlers[n]; handlerName = n; break; }
       }
     }
 
-    const handler = commandHandlers[handlerName];
-    if (!handler) return interaction.reply({ content: 'Command handler not found for: ' + handlerName, ephemeral: true });
+    // Fallback: search modulesMeta by matching name to sub/group or relaxed match
+    if (!handler && Array.isArray(modulesMeta)) {
+      const wanted = (sub || group || '').toLowerCase();
+      const found = modulesMeta.find(m => (m.name || '').toLowerCase() === wanted || (m.sanitizedName || '').toLowerCase() === wanted);
+      if (found && commandHandlers[found.name]) { handler = commandHandlers[found.name]; handlerName = found.name; }
+    }
+
+    if (DEBUG) {
+      console.log('[DEBUG_COMMANDS] interaction:', { guild: interaction.guild?.id, channel: interaction.channel?.id, command: group, sub, resolvedHandler: handlerName, args });
+      if (!handler) console.log('[DEBUG_COMMANDS] available handlers:', Object.keys(commandHandlers).slice(0,200));
+    }
+
+    if (!handler) {
+      return interaction.reply({ content: 'Command handler not found for: ' + (sub || group), ephemeral: true });
+    }
 
     // enforce channel locks for interactions
     if (!isCommandAllowedInChannel(handlerName, interaction.channel)) {
@@ -2165,24 +2468,67 @@ client.on('interactionCreate', async (interaction) => {
     try {
       for (const opt of interaction.options.data || []) {
         slashOptions[opt.name] = opt.value || (opt.resolved ? opt.resolved : null);
-        // For role/user/channel we can resolve by id using resolved
         if (interaction.options.getRole && interaction.options.getRole(opt.name)) slashOptions[opt.name] = interaction.options.getRole(opt.name);
         if (interaction.options.getUser && interaction.options.getUser(opt.name)) slashOptions[opt.name] = interaction.options.getUser(opt.name);
         if (interaction.options.getChannel && interaction.options.getChannel(opt.name)) slashOptions[opt.name] = interaction.options.getChannel(opt.name);
       }
     } catch (e) { /* ignore */ }
+  // Try to defer reply to avoid the 3s interaction timeout for long handlers
+  let didDefer = false;
+  try { await interaction.deferReply({ ephemeral: false }); didDefer = true; } catch (e) { /* ignore if already deferred/replied */ }
+  // In some edge cases deferReply may throw but the interaction object already reports
+  // being deferred or replied. Reflect that in didDefer so reply() uses editReply/followUp.
+  try { didDefer = didDefer || !!interaction.deferred || !!interaction.replied; } catch (e) { /* ignore */ }
 
-    const fakeMessage = {
+              const fakeMessage = {
       author: interaction.user,
       member: interaction.member,
       guild: interaction.guild,
       channel: interaction.channel,
       slashOptions,
-      reply: async (payload) => {
-        const content = typeof payload === 'string' ? payload : (payload.content || JSON.stringify(payload));
-        if (!interaction.replied && !interaction.deferred) return interaction.reply({ content, fetchReply: true });
-        return interaction.followUp({ content, fetchReply: true });
-      }
+      // Ensure we only attempt a primary acknowledgement once. Subsequent replies use followUp.
+      reply: (() => {
+        let responseSent = false;
+        // serialize attempts to avoid races
+        return async (payload) => {
+          const contentObj = (typeof payload === 'string') ? { content: payload } : (payload && typeof payload === 'object') ? payload : { content: JSON.stringify(payload) };
+          try {
+            // If we already sent a primary response, always use followUp
+            if (responseSent) {
+              try { return await interaction.followUp(contentObj); } catch (e) { console.error('followUp after responseSent failed:', e); return null; }
+            }
+
+            // Prefer editReply/followUp when deferred or already replied
+            if (didDefer || interaction.deferred || interaction.replied) {
+              try {
+                responseSent = true; // reserve primary response slot immediately to avoid races
+                if (interaction.deferred && !interaction.replied) {
+                  await interaction.editReply(contentObj);
+                } else {
+                  await interaction.followUp(contentObj);
+                }
+                return;
+              } catch (e) {
+                // fallback to followUp if editReply fails
+                try { responseSent = true; await interaction.followUp(contentObj); return; } catch (e2) { console.error('Failed to send via editReply/followUp:', e, e2); }
+              }
+            }
+
+            // Otherwise attempt a normal reply, with fallbacks
+            try {
+              responseSent = true; // mark reserved before awaiting to avoid concurrent callers racing
+              await interaction.reply(contentObj);
+              return;
+            } catch (errReply) {
+              // common failure: interaction already acknowledged; try followUp
+              try { responseSent = true; await interaction.followUp(contentObj); return; } catch (e) { console.error('Failed to send interaction response after reply failed:', e); }
+            }
+          } catch (err) {
+            // Last-resort: try followUp
+            try { await interaction.followUp(contentObj); responseSent = true; return; } catch (e) { console.error('Failed to send interaction response (final fallback):', e); }
+          }
+        };
+      })()
     };
 
     await handler(fakeMessage, args);

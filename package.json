@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/bot.js",
     "dev": "node --check src/bot.js && node src/bot.js",
-    "health:cli": "node ./tests/health-check.js"
+    "health:cli": "node ./tests/health-check.js",
+    "test:commands": "node ./tests/run_all_commands.js"
   },
   "engines": {
     "node": "20.x"

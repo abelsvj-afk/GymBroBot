@@ -1,5 +1,8 @@
 export default {
   name: 'give',
+  description: 'Give GymCoins to another member',
+  exampleArgs: '@user 10',
+  notes: 'Mention a user and an amount to transfer GymCoins. You must have enough balance.',
   group: 'economy',
   slash: { group: 'economy', options: [ { name: 'user', type: 'USER', description: 'Who gets the GymCoins?', required: true }, { name: 'amount', type: 'INTEGER', description: 'How many GymCoins?', required: true } ] },
   async execute(context, message, args) {

@@ -1,5 +1,17 @@
+const _GBB_g = globalThis;
+const adminLog = _GBB_g.adminLog || (async () => {});
+const awardAchievement = _GBB_g.awardAchievement || (async () => false);
+const getOpenAIResponse = _GBB_g.getOpenAIResponse || (async () => '');
+const validateModel = _GBB_g.validateModel || (async () => ({ ok: false }));
+const saveWeekly = _GBB_g.saveWeekly || (async () => {});
+const saveHabits = _GBB_g.saveHabits || (async () => {});
+const saveMemory = _GBB_g.saveMemory || (async () => {});
+
 export default {
   name: 'checkin',
+  description: 'Daily check-in for economy rewards',
+  exampleArgs: '',
+  notes: 'Claim your daily GymCoin reward. Cooldown applies.',
   group: 'economy',
   slash: { group: 'economy', options: [] },
   async execute(context, message, args) {

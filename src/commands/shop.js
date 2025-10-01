@@ -1,5 +1,7 @@
 export default {
   name: 'shop',
+  description: 'Show available shop items',
+  notes: 'Displays purchasable items and their IDs. Use `/economy buy <item>` to purchase.',
   group: 'economy',
   slash: { group: 'economy', options: [] },
   async execute(context, message, args) {

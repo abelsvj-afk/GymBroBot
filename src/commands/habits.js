@@ -1,6 +1,8 @@
 export default {
   name: 'habits',
   description: 'List your habits',
+  exampleArgs: '',
+  notes: 'Shows habits you are tracking. Use `/habits add` and `/habits check` to manage them.',
   group: 'habits',
   slash: { type: 'subcommand' },
   execute: async (context, message, args) => {

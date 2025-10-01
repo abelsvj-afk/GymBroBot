@@ -1,7 +1,9 @@
 export default {
   name: 'partner',
-  description: 'Find a partner (goal/future)',
+  description: 'Join the accountability partner matching queue or find a partner',
+  notes: 'Use to request or find an accountability partner for workouts or goals.',
   group: 'partners',
+  exampleArgs: 'goal',
   slash: { options: [{ name: 'type', type: 3, description: 'goal or future', required: true }] },
   execute: async (context, message, args) => {
     const type = args[0]?.toLowerCase();

@@ -1,4 +1,8 @@
-import { EmbedBuilder } from 'discord.js';
+import { EmbedBuilder, ChannelType } from 'discord.js';
+import fs from 'fs';
+import path from 'path';
+import { pathToFileURL } from 'url';
+import os from 'os';
 
 async function runHealthCheck(context, guild) {
   const { storage, validateModel, client, aiHealth } = context;
@@ -43,7 +47,7 @@ async function runHealthCheck(context, guild) {
 
   // Node engine compatibility (check package.json engines)
   try {
-    const pkg = JSON.parse(require('fs').readFileSync(require('path').join(process.cwd(),'package.json'),'utf8'));
+    const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
     const engine = pkg.engines && pkg.engines.node;
     const nodeOk = !engine || (engine && process.version && process.version.startsWith(engine.replace('x','')));
     results.push({ key: 'node', name: 'Node Engine', ok: !!nodeOk, note: engine ? `Required: ${engine}, Running: ${process.version}` : 'No engine specified' });
@@ -51,17 +55,15 @@ async function runHealthCheck(context, guild) {
 
   // package.json deps sanity (installed node_modules presence)
   try {
-    const fs = require('fs');
-    const pkg = JSON.parse(fs.readFileSync(require('path').join(process.cwd(),'package.json'),'utf8'));
-    const deps = Object.keys(pkg.dependencies||{});
+    const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'));
+    const deps = Object.keys(pkg.dependencies || {});
     const missing = [];
-    for (const d of deps) { if (!fs.existsSync(require('path').join(process.cwd(),'node_modules',d))) missing.push(d); }
-    results.push({ key: 'deps', name: 'Dependencies', ok: missing.length===0, note: missing.length ? 'Missing: '+missing.slice(0,5).join(', ') : 'All deps installed' });
+    for (const d of deps) { if (!fs.existsSync(path.join(process.cwd(), 'node_modules', d))) missing.push(d); }
+    results.push({ key: 'deps', name: 'Dependencies', ok: missing.length === 0, note: missing.length ? 'Missing: ' + missing.slice(0,5).join(', ') : 'All deps installed' });
   } catch (e) { results.push({ key: 'deps', name: 'Dependencies', ok: false, note: String(e) }); }
 
   // Disk space check (simple - free bytes on cwd drive)
   try {
-    const os = require('os');
     const diskFree = os.freemem(); // approximate using free memory as proxy (Windows limitation)
     results.push({ key: 'disk', name: 'Free Memory (proxy)', ok: diskFree > 50 * 1024 * 1024, note: `${Math.round(diskFree/1024/1024)} MB free` });
   } catch (e) { results.push({ key: 'disk', name: 'Disk/Memory', ok: false, note: String(e) }); }
@@ -98,6 +100,17 @@ async function runHealthCheck(context, guild) {
     results.push({ key: 'errors', name: 'Recent AI Errors', ok: lastErrors.length===0, note: lastErrors.length ? lastErrors.join('\n') : 'No recent errors' });
   } catch (e) { results.push({ key: 'errors', name: 'Recent AI Errors', ok: false, note: String(e) }); }
 
+    // Commands health: run a quick simulated check of each command's execute() to ensure they don't crash
+    try {
+      const cmdCheck = await runCommandChecks(context, guild, { simulated: true, timeoutMs: 8000 });
+      const pass = cmdCheck.passed;
+      const total = cmdCheck.total;
+      const pct = total ? Math.round((pass / total) * 100) : 0;
+      results.push({ key: 'commands', name: 'Commands', ok: pct >= 80, note: `${pass}/${total} commands ran successfully (${pct}%)` });
+    } catch (e) {
+      results.push({ key: 'commands', name: 'Commands', ok: false, note: String(e) });
+    }
+
   // Build embed
   const worst = results.find(r=>!r.ok) ? 'bad' : 'good';
   const colors = { good: 0x2ECC71, warn: 0xF1C40F, bad: 0xE74C3C };
@@ -131,9 +144,20 @@ async function runHealthCheck(context, guild) {
   return { embed, results };
 }
 
+const _GBB_g = globalThis;
+const adminLog = _GBB_g.adminLog || (async () => {});
+const awardAchievement = _GBB_g.awardAchievement || (async () => false);
+const getOpenAIResponse = _GBB_g.getOpenAIResponse || (async () => '');
+const validateModel = _GBB_g.validateModel || (async () => ({ ok: false }));
+const saveWeekly = _GBB_g.saveWeekly || (async () => {});
+const saveHabits = _GBB_g.saveHabits || (async () => {});
+const saveMemory = _GBB_g.saveMemory || (async () => {});
+
 export default {
   name: 'health',
   description: 'Run a health diagnostic for the bot (storage, AI, scheduling, mongo)',
+  exampleArgs: '',
+  notes: 'Admin-only diagnostic. Shows storage, AI, and command check status. Use from admin channels.',
   group: 'admin',
   slash: { options: [] },
   async execute(context, message, args) {
@@ -146,7 +170,7 @@ export default {
         const ch = guild.channels.cache.find(c => (c.name||'').toLowerCase() === 'gbb-health' && c.type === 0);
         if (ch) {
           // try to find an existing pinned health message
-          const pins = await ch.messages.fetchPinned();
+          const pins = await ch.messages.fetchPins();
           const existing = pins.find(m => m.author && m.author.id === context.client.user.id && m.embeds && m.embeds[0] && m.embeds[0].title && m.embeds[0].title.includes('GymBotBro — Health Scan'));
           if (existing) {
             await existing.edit({ embeds: [embed] });
@@ -163,4 +187,64 @@ export default {
   }
 };
 
-export { runHealthCheck };
+export { runHealthCheck, runCommandChecks };
+// Expose a helper to run command checks (simulated or live)
+async function runCommandChecks(context, guild, options = {}) {
+  const { simulated = true, timeoutMs = 5000, include = null } = options;
+  const commandsDir = path.join(process.cwd(), 'src', 'commands');
+  const files = fs.readdirSync(commandsDir).filter(f => f.endsWith('.js'));
+  const results = [];
+
+  for (const f of files) {
+    const full = path.join(commandsDir, f);
+    let mod;
+    try {
+      mod = await import(pathToFileURL(full).href);
+    } catch (e) {
+      results.push({ file: f, ok: false, reason: 'import failed: ' + String(e).slice(0,200) });
+      continue;
+    }
+    const def = mod.default;
+    if (!def || typeof def.execute !== 'function') { results.push({ file: f, ok: false, reason: 'no execute' }); continue; }
+    if (include && !include.includes(def.name)) { results.push({ file: f, ok: true, skipped: true }); continue; }
+
+    // Skip admin-only or obviously destructive commands in simulated mode
+    const skipPatterns = ['admin', 'shopadmin', 'delete', 'drop', 'ban'];
+    if (simulated && (def.group && def.group.toLowerCase().includes('admin') || skipPatterns.some(p=>def.name && def.name.toLowerCase().includes(p)))) {
+      results.push({ file: f, ok: true, skipped: true });
+      continue;
+    }
+
+    // Build fake context and message similar to the test runner but using context stores so commands exercise same data
+    const ctx = Object.assign({}, context);
+    const message = {
+      author: { id: 'health-check', username: 'health-check' },
+      member: { roles: { cache: new Map() } },
+      guild: guild || null,
+      channel: { id: 'health-check-channel', send: async ()=>({ id: 'hc' }), messages: { fetchPins: async ()=>[] } },
+      content: '',
+      reply: async () => ({}),
+      mentions: { users: { first: ()=>null } }
+    };
+
+    // If live, point message.channel to a real channel in guild if possible
+    if (!simulated && guild) {
+      const ch = guild.channels.cache.find(c=>c.isTextBased && c.permissionsFor && c.viewable);
+      if (ch) message.channel = ch;
+    }
+
+    let ok = false; let reason = null;
+    try {
+      const p = def.execute(ctx, message, ['health-check']);
+      if (p && typeof p.then === 'function') {
+        await Promise.race([p, new Promise((_,r)=>setTimeout(()=>r(new Error('timeout')), timeoutMs))]);
+      }
+      ok = true;
+    } catch (e) { ok = false; reason = String(e).slice(0,300); }
+    results.push({ file: f, name: def.name || f, ok, reason });
+  }
+
+  const passed = results.filter(r=>r.ok && !r.skipped).length;
+  const total = results.filter(r=>!r.skipped).length;
+  return { results, passed, total };
+}

@@ -1,5 +1,8 @@
 export default {
   name: 'buy',
+  description: 'Buy an item from the shop using GymCoins',
+  exampleArgs: 'item_id',
+  notes: 'Use the shop command to list available item IDs. Buying spends GymCoins from your balance.',
   group: 'economy',
   slash: { group: 'economy', options: [ { name: 'item', type: 'STRING', description: 'Item id to buy', required: true } ] },
   async execute(context, message, args) {

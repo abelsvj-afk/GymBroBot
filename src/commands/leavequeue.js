@@ -1,6 +1,7 @@
 export default {
   name: 'leavequeue',
-  description: 'Leave the partner queue',
+  description: 'Leave the accountability partner matching queue',
+  notes: 'Removes you from the partner matching queue if you no longer want a partner.',
   group: 'partners',
   slash: { type: 'subcommand' },
   execute: async (context, message, args) => {

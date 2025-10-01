@@ -1,6 +1,17 @@
+const _GBB_g = globalThis;
+const adminLog = _GBB_g.adminLog || (async () => {});
+const awardAchievement = _GBB_g.awardAchievement || (async () => false);
+const getOpenAIResponse = _GBB_g.getOpenAIResponse || (async () => '');
+const validateModel = _GBB_g.validateModel || (async () => ({ ok: false }));
+const saveWeekly = _GBB_g.saveWeekly || (async () => {});
+const saveHabits = _GBB_g.saveHabits || (async () => {});
+const saveMemory = _GBB_g.saveMemory || (async () => {});
+
 export default {
   name: 'addhabit',
   description: 'Start tracking a habit',
+  exampleArgs: 'drink_water',
+  notes: 'Creates a new habit to track. Use `/habits check <habit>` to mark progress and `/habits` to view.',
   group: 'habits',
   slash: { type: 'subcommand', options: [{ name: 'habit', type: 3, description: 'habit name', required: true }] },
   execute: async (context, message, args) => {
@@ -11,7 +22,7 @@ export default {
     if (!habitTracker[authorId]) habitTracker[authorId] = {};
     if (habitTracker[authorId][habit]) return message.reply("You're already tracking that habit!");
     habitTracker[authorId][habit] = { streak: 0, lastChecked: null, total: 0 };
-    saveHabits();
-    return message.reply(`✅ Started tracking: **${habit}**`);
+  try { await saveHabits(); } catch(e) { /* best-effort save */ }
+  return message.reply(`✅ Started tracking: **${habit}**`);
   }
 };

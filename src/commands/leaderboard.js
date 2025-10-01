@@ -1,6 +1,8 @@
 export default {
   name: 'leaderboard',
-  description: 'Show weekly leaderboard',
+  description: 'Show fitness leaderboard rankings',
+  notes: 'Displays top members by workouts or points. Useful for friendly competition.',
+  exampleArgs: '',
   group: 'fitness',
   slash: { type: 'subcommand' },
   execute: async (context, message, args) => {

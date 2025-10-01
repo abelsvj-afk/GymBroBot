@@ -1,0 +1,147 @@
+{
+  "results": [
+    {
+      "file": "addhabit.js",
+      "name": "addhabit",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "balance.js",
+      "name": "balance",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "buy.js",
+      "name": "buy",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "check.js",
+      "name": "check",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "checkin.js",
+      "name": "checkin",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "coach.js",
+      "name": "coach",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "daily.js",
+      "name": "daily",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "give.js",
+      "name": "give",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "habits.js",
+      "name": "habits",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "health.js",
+      "ok": true,
+      "skipped": true
+    },
+    {
+      "file": "help.js",
+      "name": "help",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "leaderboard.js",
+      "name": "leaderboard",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "leavequeue.js",
+      "name": "leavequeue",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "partner.js",
+      "name": "partner",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "profile.js",
+      "name": "profile",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "progress.js",
+      "name": "progress",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "quote.js",
+      "name": "quote",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "shop.js",
+      "name": "shop",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "shopadmin.js",
+      "ok": true,
+      "skipped": true
+    },
+    {
+      "file": "streak.js",
+      "name": "streak",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "streakroles.js",
+      "name": "streakroles",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "testcommands.js",
+      "ok": true,
+      "skipped": true
+    },
+    {
+      "file": "track.js",
+      "name": "track",
+      "ok": true,
+      "reason": null
+    },
+    {
+      "file": "workoutplan.js",
+      "name": "workoutplan",
+      "ok": true,
+      "reason": null
+    }
+  ],
+  "passed": 21,
+  "total": 21
+}

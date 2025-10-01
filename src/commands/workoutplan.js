@@ -1,6 +1,8 @@
 export default {
   name: 'workoutplan',
   description: 'Get a workout plan',
+  exampleArgs: 'push',
+  notes: 'Request a simple workout plan. Options: push, pull, legs, general.',
   group: 'fitness',
   slash: { type: 'subcommand', options: [{ name: 'type', type: 3, description: 'push/pull/legs/general', required: false }] },
   execute: async (context, message, args) => {

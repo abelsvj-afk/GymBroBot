@@ -1,5 +1,8 @@
 export default {
   name: 'profile',
+  description: 'View a user\'s profile and economy stats',
+  exampleArgs: '@user',
+  notes: 'Optional mention to view another user. Shows balance, streaks, and achievements.',
   group: 'economy',
   slash: { group: 'economy', options: [{ name: 'user', type: 6, description: 'User to view', required: false }] },
   async execute(context, message, args) {

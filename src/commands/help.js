@@ -1,6 +1,8 @@
 export default {
   name: 'help',
   description: 'Show help (migrated from commandHandlers)',
+  exampleArgs: '',
+  notes: 'Shows categorized command summary. Use this to discover commonly-used commands.',
   execute: async (context, message, args) => {
     const { EmbedBuilder } = context;
     const embed = new EmbedBuilder()
