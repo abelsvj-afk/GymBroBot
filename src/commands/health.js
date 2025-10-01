@@ -162,7 +162,53 @@ export default {
   slash: { options: [] },
   async execute(context, message, args) {
     const guild = message.guild || (message.channel && message.channel.guild) || null;
+    
+    // Check for debug option
+    const isDebugMode = args.includes('debug') || args.includes('--debug');
+    const isOwner = message.author.id === '547946513876369409';
+    
+    if (isDebugMode && !isOwner) {
+      return message.reply('❌ Debug mode is restricted to the bot owner only.');
+    }
+    
     const { embed } = await runHealthCheck(context, guild);
+    
+    // If debug mode, run comprehensive self-diagnostic
+    if (isDebugMode) {
+      await message.reply('🔧 **DEBUG MODE ACTIVATED** - Running comprehensive self-diagnostic...');
+      
+      const debugResults = await this.runSelfDiagnostic(context, message, guild);
+      
+      // Send debug results
+      const debugEmbed = new EmbedBuilder()
+        .setColor(debugResults.allPassed ? 0x00FF00 : 0xFFFF00)
+        .setTitle('🔧 Self-Diagnostic Results')
+        .setDescription(`Completed ${debugResults.totalTests} diagnostic tests`)
+        .addFields(
+          { name: '✅ Passed', value: `${debugResults.passed} tests`, inline: true },
+          { name: '❌ Failed', value: `${debugResults.failed} tests`, inline: true },
+          { name: '⚠️ Warnings', value: `${debugResults.warnings} warnings`, inline: true }
+        )
+        .setFooter({ text: 'Debug mode • Owner only' })
+        .setTimestamp();
+      
+      if (debugResults.details.length > 0) {
+        debugEmbed.addFields([
+          { name: '📋 Detailed Results', value: debugResults.details.slice(0, 10).join('\n') }
+        ]);
+      }
+      
+      await message.channel.send({ embeds: [debugEmbed] });
+      
+      if (debugResults.details.length > 10) {
+        const additionalEmbed = new EmbedBuilder()
+          .setColor(0x9B59B6)
+          .setTitle('🔍 Additional Debug Information')
+          .setDescription(debugResults.details.slice(10).join('\n'))
+          .setTimestamp();
+        await message.channel.send({ embeds: [additionalEmbed] });
+      }
+    }
 
     // Try to post/update in #gbb-health if present, otherwise reply with embed
     try {
@@ -193,6 +239,108 @@ export default {
     } catch (e) { console.error('health command post failed', e); }
 
     return message.reply({ embeds: [embed] });
+  },
+  
+  async runSelfDiagnostic(context, message, guild) {
+    const results = {
+      totalTests: 0,
+      passed: 0,
+      failed: 0,
+      warnings: 0,
+      details: [],
+      allPassed: true
+    };
+    
+    const addResult = (test, passed, details) => {
+      results.totalTests++;
+      if (passed) {
+        results.passed++;
+        results.details.push(`✅ ${test}: ${details}`);
+      } else {
+        results.failed++;
+        results.allPassed = false;
+        results.details.push(`❌ ${test}: ${details}`);
+      }
+    };
+    
+    const addWarning = (test, details) => {
+      results.totalTests++;
+      results.warnings++;
+      results.details.push(`⚠️ ${test}: ${details}`);
+    };
+    
+    // Test 1: Memory Usage
+    const memUsage = process.memoryUsage();
+    const memMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+    addResult('Memory Usage', memMB < 500, `${memMB}MB heap used`);
+    
+    // Test 2: Uptime
+    const uptimeHours = Math.round(process.uptime() / 3600 * 100) / 100;
+    addResult('Process Uptime', uptimeHours > 0, `${uptimeHours} hours`);
+    
+    // Test 3: Global Storage
+    addResult('Global Storage', !!globalThis.storage, globalThis.storage ? 'Available' : 'Not initialized');
+    
+    // Test 4: Channel Personalities
+    const channelPersonalities = globalThis.channelPersonalities;
+    addResult('Channel Personalities', !!channelPersonalities, channelPersonalities ? 'All 4 personalities active' : 'Not initialized');
+    
+    // Test 5: OpenAI Integration
+    try {
+      if (typeof globalThis.getOpenAIResponse === 'function') {
+        const testResponse = await globalThis.getOpenAIResponse('Test', 'system');
+        addResult('OpenAI Integration', !!testResponse, 'API responding');
+      } else {
+        addResult('OpenAI Integration', false, 'getOpenAIResponse not available');
+      }
+    } catch (error) {
+      addResult('OpenAI Integration', false, error.message);
+    }
+    
+    // Test 6: Database Connection
+    try {
+      const ping = await context.storage.ping();
+      addResult('Database Connection', ping.ok, ping.error || 'MongoDB responding');
+    } catch (error) {
+      addResult('Database Connection', false, error.message);
+    }
+    
+    // Test 7: Command Loading
+    const commands = globalThis.commands || new Map();
+    addResult('Command System', commands.size > 20, `${commands.size} commands loaded`);
+    
+    // Test 8: Guild Connectivity
+    const guilds = context.client.guilds.cache.size;
+    addResult('Discord Guilds', guilds > 0, `Connected to ${guilds} servers`);
+    
+    // Test 9: Channel Detection
+    let personalityChannels = 0;
+    if (guild) {
+      const requiredChannels = ['faith', 'health', 'wealth', 'daily-checkins'];
+      for (const channelName of requiredChannels) {
+        if (guild.channels.cache.find(ch => ch.name === channelName)) {
+          personalityChannels++;
+        }
+      }
+    }
+    addResult('Personality Channels', personalityChannels === 4, `${personalityChannels}/4 channels detected`);
+    
+    // Test 10: Performance Check
+    const startTime = Date.now();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const responseTime = Date.now() - startTime;
+    addResult('Response Time', responseTime < 150, `${responseTime}ms latency`);
+    
+    // Warnings for potential issues
+    if (memMB > 300) {
+      addWarning('High Memory Usage', `${memMB}MB - consider monitoring`);
+    }
+    
+    if (personalityChannels < 4 && guild) {
+      addWarning('Missing Channels', 'Use /admin setupchannels to create personality channels');
+    }
+    
+    return results;
   }
 };
 

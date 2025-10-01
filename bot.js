@@ -2226,6 +2226,15 @@ client.once('ready', async () => {
   try { await loadAllData(); } catch (e) { console.error('loadAllData failed', e); }
   // Load optional command modules from src/commands (allows modular commands)
   await loadCommandModules();
+  
+  // Initialize channel personalities for autonomous responses
+  try {
+    const ChannelPersonalities = await import('./src/channelPersonalities.js');
+    globalThis.channelPersonalities = new ChannelPersonalities.default(client, storage);
+    console.log('Channel personalities initialized (faith, health, wealth, daily-checkins)');
+  } catch (e) {
+    console.error('Channel personalities initialization failed:', e);
+  }
   setInterval(() => tryAutoMatch(), 1000 * 30); // every 30s
 
   // Run startup AI health check and pin admin docs to admin/mod/logging channels
