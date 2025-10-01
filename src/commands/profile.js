@@ -15,8 +15,8 @@ export default {
       const economy = await storage.load('economy', {});
       const econ = economy[userId] || { balance: 0, lastClaim: 0, lastCheckin: null, streak: 0 };
       const weekly = fitnessWeekly[userId] || { yes: 0, no: 0 };
-      const msgs = messageCounts[userId] || 0;
-      const achs = achievementsStore[userId] || [];
+  const msgs = (messageCounts && messageCounts[userId]) ? messageCounts[userId] : 0;
+  const achs = (achievementsStore && Array.isArray(achievementsStore[userId])) ? achievementsStore[userId] : (achievementsStore && achievementsStore[userId]) || [];
 
       // Attempt to use a Canvas implementation for a nicer card; prefer @napi-rs/canvas (prebuilt) then fallback to node-canvas
       let Canvas = null;

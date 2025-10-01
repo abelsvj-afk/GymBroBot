@@ -218,10 +218,15 @@ async function runCommandChecks(context, guild, options = {}) {
     // Build fake context and message similar to the test runner but using context stores so commands exercise same data
     const ctx = Object.assign({}, context);
     const message = {
-      author: { id: 'health-check', username: 'health-check' },
-      member: { roles: { cache: new Map() } },
+      author: {
+        id: 'health-check',
+        username: 'health-check',
+        discriminator: '0000',
+        displayAvatarURL: (opts) => null
+      },
+      member: { roles: { cache: new Map() }, permissions: { has: () => false } },
       guild: guild || null,
-      channel: { id: 'health-check-channel', send: async ()=>({ id: 'hc' }), messages: { fetchPins: async ()=>[] } },
+      channel: { id: 'health-check-channel', send: async ()=>({ id: 'hc' }), messages: { fetchPins: async ()=>[] }, isTextBased: true, permissionsFor: ()=>({ viewable: true }) },
       content: '',
       reply: async () => ({}),
       mentions: { users: { first: ()=>null } }

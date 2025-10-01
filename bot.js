@@ -294,100 +294,24 @@ app.get('/admin/ai-health', async (req, res) => {
 });
 
 // ---------------- OpenAI Helper ----------------
-async function getOpenAIResponse(prompt){
-  try{
-    const completion = await openai.chat.completions.create({ model: OPENAI_MODEL, messages:[{role:"user", content:prompt}], max_tokens:300, temperature:0.7 });
-    return completion.choices[0].message.content.trim();
-  } catch(e){
-    console.error("OpenAI error (primary model):", e?.message || e);
-
-    // If the primary model failed, try the fallback model once (useful when a model isn't available for the API key)
-    if (OPENAI_MODEL !== FALLBACK_OPENAI_MODEL) {
+async function getOpenAIResponse(prompt) {
+  try {
+    const completion = await openai.chat.completions.create({ model: OPENAI_MODEL, messages: [{ role: 'user', content: prompt }], max_tokens: 300, temperature: 0.7 });
+    return completion?.choices?.[0]?.message?.content?.trim() || '';
+  } catch (e) {
+    console.error('OpenAI error (primary model):', e?.message || e);
+    // Try fallback model once
+    if (OPENAI_MODEL && FALLBACK_OPENAI_MODEL && OPENAI_MODEL !== FALLBACK_OPENAI_MODEL) {
       try {
         console.log(`[OpenAI] Attempting fallback model: ${FALLBACK_OPENAI_MODEL}`);
-        const completion = await openai.chat.completions.create({ model: FALLBACK_OPENAI_MODEL, messages:[{role:"user", content:prompt}], max_tokens:300, temperature:0.7 });
-        return completion.choices[0].message.content.trim();
+        const completion = await openai.chat.completions.create({ model: FALLBACK_OPENAI_MODEL, messages: [{ role: 'user', content: prompt }], max_tokens: 300, temperature: 0.7 });
+        return completion?.choices?.[0]?.message?.content?.trim() || '';
       } catch (err2) {
-        console.error("OpenAI error (fallback):", err2?.message || err2);
-      }
-
-// Admin logging: attempt to post a message to mod/admin/logging channels (if present) and pin it
-async function findAdminChannels(guild) {
-  // Flexible admin/mod/logging channel discovery: prefer exact matches, then contains, then systemChannel
-  const channels = {};
-  const lc = s => (s || '').toLowerCase();
-  const byExact = name => guild.channels.cache.find(ch => lc(ch.name) === name && ch.type === ChannelType.GuildText);
-  const byContains = name => guild.channels.cache.find(ch => lc(ch.name).includes(name) && ch.type === ChannelType.GuildText);
-
-  channels.logging = byExact('logging') || byExact('log') || byContains('log') || null;
-  channels.admin = byExact('admin') || byContains('admin') || byContains('staff') || null;
-  channels.mod = byExact('mod') || byExact('moderator') || byContains('mod') || null;
-
-  if (!channels.logging && guild.systemChannel) channels.logging = guild.systemChannel;
-  if (!channels.admin && guild.systemChannel) channels.admin = guild.systemChannel;
-  if (!channels.mod && guild.systemChannel) channels.mod = guild.systemChannel;
-
-  return channels;
-}
-
-async function adminLog(guild, text) {
-  try {
-    const chs = await findAdminChannels(guild);
-    if (chs.logging) {
-      // send as embed when possible
-      try {
-        return await sendLogEmbed(chs.logging, 'GymBotBro Audit', [{ name: 'Info', value: text }]);
-      } catch (e) {
-        return await chs.logging.send(text);
+        console.error('OpenAI error (fallback):', err2?.message || err2);
       }
     }
-    // fallback to system channel
-    if (guild.systemChannel) return guild.systemChannel.send(text);
-  } catch (e) { console.error('adminLog error:', e); }
-}
-
-// Send a structured embed to a logging channel
-async function sendLogEmbed(channel, title, fields = []) {
-  const embed = new EmbedBuilder()
-    .setTitle(title)
-    .setColor(0x0099ff)
-    .setTimestamp(new Date());
-  fields.forEach(f => embed.addFields({ name: f.name || '\u200B', value: f.value || '\u200B', inline: f.inline || false }));
-  return channel.send({ embeds: [embed] });
-}
-
-// Pin a command document into admin channels if not already present
-async function pinCommandDocs(guild) {
-  try {
-    const chs = await findAdminChannels(guild);
-
-    const adminDoc = `GymBotBro Admin Instructions:\n\n1) Managing AI model\n- Use \`!setmodel <model> [--save] [--force]\` to change models.\n  - Without --force the bot validates model availability.\n  - Use --save to persist to .env in the repo root (Railway will pick ENV var from project settings).\n- Use \`!getmodel\` to view current model and fallback.\n- Use \`!testai\` to run a quick health check (admins only).\n\n2) Deployment notes for Railway:\n- Set environment variables in Railway project settings (OPENAI_API_KEY, OPENAI_MODEL, FALLBACK_OPENAI_MODEL, DISCORD_TOKEN).\n- When you change OPENAI_MODEL via CLI or Railway UI, restart the service to apply unless you use \`!setmodel --save\`.\n\n3) Coordination with myninja AI / GitHub:\n- myninja AI may push code changes to this repo. If you persist changes via \`.env\` and myninja also updates files, ensure you sync changes and don't overwrite .env in CI.\n`;
-
-  const loggingDoc = `GymBotBro Logging Channel ΓÇô Purpose & Usage:\n\nThis channel is for audit logs only. Do NOT post general instructions here.\nLogs posted here include:\n- Model changes (who changed model, from->to, saved to .env)\n- AI health checks and failures\n- Startup fallback switches\n\nAvailable logging commands (admins):\n- !getmodel -> shows current model & fallback\n- !testai -> runs a quick AI health check (60s cooldown per guild)\n- !setmodel <model> [--save] [--force] -> change primary model\n- !setfallback <model> [--save] -> change fallback model\n\nMongo integration (optional):\n- If you set MONGO_URI in the deployment environment (MongoDB Atlas connection string), audit logs will be recorded to the 'ai_health' collection for long-term storage.\n\nPinned messages here are for logging policy and retention. Only admins should unpin.`;
-
-    // Admin/mod channels: post adminDoc
-    for (const key of ['admin', 'mod']) {
-      const ch = chs[key];
-      if (!ch) continue;
-  const pins = await ch.messages.fetchPins();
-      const already = pins.find(m => m.content && m.content.startsWith('GymBotBro Admin Instructions'));
-      if (!already) {
-        const sent = await ch.send(adminDoc);
-        await sent.pin();
-      }
-    }
-
-    // Logging channel: post loggingDoc only
-    if (chs.logging) {
-      const ch = chs.logging;
-  const pins = await ch.messages.fetchPins();
-      const already = pins.find(m => m.content && m.content.startsWith('GymBotBro Logging Channel'));
-      if (!already) {
-        const sent = await ch.send(loggingDoc);
-        await sent.pin();
-      }
-    }
-  } catch (e) { console.error('pinCommandDocs error:', e); }
+    return "I can't respond right now.";
+  }
 }
 
 // Telemetry entry helper
@@ -2029,7 +1953,22 @@ async function updateHealthForGuild(context, guild) {
         const thirtyMin = 30 * 60 * 1000;
         if (now - last > thirtyMin) {
           lastHealthAlert[guild.id] = now; await saveLastHealthAlert();
-          const adminChs = await findAdminChannels(guild);
+          // Use a resilient lookup for admin channels. Some runtime edits may have
+          // hoisted or moved findAdminChannels; fall back to an inline discovery
+          // function if the named helper is not available.
+          const adminChs = (typeof findAdminChannels === 'function') ? await findAdminChannels(guild) : (async (g) => {
+            const channels = {};
+            const lc = s => (s || '').toLowerCase();
+            const byExact = name => g.channels.cache.find(ch => lc(ch.name) === name && ch.type === ChannelType.GuildText);
+            const byContains = name => g.channels.cache.find(ch => lc(ch.name).includes(name) && ch.type === ChannelType.GuildText);
+            channels.logging = byExact('logging') || byExact('log') || byContains('log') || null;
+            channels.admin = byExact('admin') || byContains('admin') || byContains('staff') || null;
+            channels.mod = byExact('mod') || byExact('moderator') || byContains('mod') || null;
+            if (!channels.logging && g.systemChannel) channels.logging = g.systemChannel;
+            if (!channels.admin && g.systemChannel) channels.admin = g.systemChannel;
+            if (!channels.mod && g.systemChannel) channels.mod = g.systemChannel;
+            return channels;
+          })(guild);
           let alertTarget = adminChs.logging || adminChs.admin || adminChs.mod || ch;
           const alertMsg = `🚨 **GymBotBro Alert:** Health scan detected issues. Check the pinned health report in <#${ch.id}>.`;
           try { await alertTarget.send({ content: alertMsg }); } catch(e){ try { await ch.send(alertMsg); } catch(e){} }
@@ -2313,7 +2252,9 @@ client.once('ready', async () => {
   // Post a brief startup health message into #gbb-health where available
   try {
     // Run an initial full health run (and schedule periodic updates)
-    const healthContext = { client, storage, validateModel, aiHealth, getOpenAIResponse, adminLog };
+    const healthContext = { client, storage, validateModel, aiHealth, getOpenAIResponse, adminLog,
+      // provide the common in-memory stores so health checks can run commands safely
+      fitnessWeekly, habitTracker, partnerQueue, messageCounts, achievementsStore, saveHabits, saveWeekly, savePartnerQueue };
     for (const guild of client.guilds.cache.values()) {
       try {
         await updateHealthForGuild(healthContext, guild);
