@@ -228,7 +228,7 @@ app.get('/health', (req, res) => {
   try {
     const isFullyInitialized = globalThis.botInitialized === true;
     const initStep = globalThis.initializationStep || 'starting';
-    
+
     const healthStatus = {
       status: isFullyInitialized ? 'healthy' : 'initializing',
       initialized: isFullyInitialized,
@@ -244,12 +244,12 @@ app.get('/health', (req, res) => {
       commands: globalThis.commands?.size || 0,
       personalities: globalThis.channelPersonalities ? 'active' : 'inactive'
     };
-    
+
     // Return 200 even during initialization, but 503 if there's an error
     res.status(200).json(healthStatus);
   } catch (error) {
-    res.status(503).json({ 
-      status: 'unhealthy', 
+    res.status(503).json({
+      status: 'unhealthy',
       error: error.message,
       timestamp: new Date().toISOString(),
       initializationStep: globalThis.initializationStep || 'unknown'
@@ -1668,7 +1668,7 @@ async function loadCommandModules() {
     // leave modulesMeta populated and return
     // Debug: print modulesMeta summary and registered handler keys (small sample)
     try {
-      console.log('modulesMeta summary:', modulesMeta.map(m => ({ name: m.name, group: m.group }))); 
+      console.log('modulesMeta summary:', modulesMeta.map(m => ({ name: m.name, group: m.group })));
       console.log('registered handlers:', Object.keys(commandHandlers).slice(0,200));
       try {
         if (commandHandlers['track']) {
@@ -1721,7 +1721,7 @@ async function buildAndSyncSlashCommands(targetGuildId = null) {
     try { await saveSlashNameMap(); } catch(e){}
     // Helpful debug summary: print what we'll register (name + subcommand count)
     try {
-      console.log('SlashCmds: cmdDefs summary ->', cmdDefs.map(c => ({ name: c.name, subcommands: (c.options||[]).length }))); 
+      console.log('SlashCmds: cmdDefs summary ->', cmdDefs.map(c => ({ name: c.name, subcommands: (c.options||[]).length })));
     } catch (e) { /* ignore logging errors */ }
 
     if (targetGuildId) {
@@ -2261,16 +2261,16 @@ globalThis.initializationStep = 'starting';
 client.once('ready', async () => {
   console.log(`Logged in as ${client.user.tag}!`);
   globalThis.initializationStep = 'logged_in';
-  
+
   client.user.setActivity("!help for commands");
   globalThis.initializationStep = 'loading_data';
-  
+
   try { await loadAllData(); } catch (e) { console.error('loadAllData failed', e); }
   globalThis.initializationStep = 'loading_commands';
-  
+
   // Load optional command modules from src/commands (allows modular commands)
   await loadCommandModules();
-  
+
   // Initialize channel personalities for autonomous responses
   try {
     const ChannelPersonalities = await import('./src/channelPersonalities.js');
@@ -2321,7 +2321,7 @@ client.once('ready', async () => {
     await buildAndSyncSlashCommands();
     console.log('Attempted to synchronize module slash commands at startup');
   } catch (e) { console.error('Slash command registration failed:', e); }
-  
+
   // Mark bot as fully initialized
   globalThis.initializationStep = 'complete';
   globalThis.botInitialized = true;

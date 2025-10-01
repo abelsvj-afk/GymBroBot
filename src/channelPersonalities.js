@@ -111,10 +111,10 @@ class ChannelPersonalities {
   setupEventListeners() {
     this.client.on('messageCreate', async (message) => {
       if (message.author.bot) return;
-      
+
       const channelName = message.channel.name?.toLowerCase();
       const personality = CHANNEL_PERSONALITIES[channelName];
-      
+
       if (personality) {
         await this.handleChannelMessage(message, personality);
       }
@@ -127,7 +127,7 @@ class ChannelPersonalities {
       const userId = message.author.id;
       const channelId = message.channel.id;
       const rateLimitKey = `${userId}-${channelId}`;
-      
+
       const lastResponse = userLastResponse.get(rateLimitKey);
       if (lastResponse && Date.now() - lastResponse < RATE_LIMIT_MS) {
         return; // Rate limited
@@ -135,7 +135,7 @@ class ChannelPersonalities {
 
       // Check if message contains relevant topics
       const messageContent = message.content.toLowerCase();
-      const isRelevant = personality.topics.some(topic => 
+      const isRelevant = personality.topics.some(topic =>
         messageContent.includes(topic)
       ) || messageContent.length > 50; // Long messages are likely seeking help
 
@@ -148,7 +148,7 @@ class ChannelPersonalities {
       if (response) {
         await message.reply(response);
         userLastResponse.set(rateLimitKey, Date.now());
-        
+
         // Update channel user data
         this.updateChannelUserData(userId, message.channel.name?.toLowerCase());
       }
@@ -175,13 +175,13 @@ Respond helpfully and stay in character. Keep responses concise but meaningful (
 `;
 
       const response = await globalThis.getOpenAIResponse(context, 'system');
-      
+
       // Create embed response
       const embed = new EmbedBuilder()
         .setColor(personality.color)
-        .setAuthor({ 
-          name: personality.name, 
-          iconURL: this.client.user.displayAvatarURL() 
+        .setAuthor({
+          name: personality.name,
+          iconURL: this.client.user.displayAvatarURL()
         })
         .setDescription(`${personality.emoji} ${response}`)
         .setTimestamp();
@@ -203,19 +203,19 @@ Respond helpfully and stay in character. Keep responses concise but meaningful (
 
   async runAllAutonomousChecks() {
     const now = Date.now();
-    
+
     for (const [channelName, personality] of Object.entries(CHANNEL_PERSONALITIES)) {
       if (!personality.autonomousChecks) continue;
-      
+
       if (now >= personality.nextCheck) {
         await this.performAutonomousCheck(channelName, personality);
-        
+
         // Set next check time with dynamic interval
         const minMs = personality.checkInterval.min * 60 * 60 * 1000;
         const maxMs = personality.checkInterval.max * 60 * 60 * 1000;
         const randomInterval = minMs + Math.random() * (maxMs - minMs);
         personality.nextCheck = now + randomInterval;
-        
+
         console.log(`[${personality.name}] Next check in ${Math.round(randomInterval / (60 * 60 * 1000))} hours`);
       }
     }
@@ -227,17 +227,17 @@ Respond helpfully and stay in character. Keep responses concise but meaningful (
       const channels = this.client.channels.cache.filter(
         channel => channel.name?.toLowerCase() === channelName && channel.type === 0
       );
-      
+
       if (channels.size === 0) return;
 
       // Get users to check (prioritize owner + active users)
       const usersToCheck = new Set();
-      
+
       // Always include owner for faith and wealth channels (high priority)
       if (['faith', 'wealth'].includes(channelName)) {
         usersToCheck.add(OWNER_ID);
       }
-      
+
       // Add other active users from this channel's data
       const channelData = this.getChannelUserData(channelName);
       Array.from(channelData.entries())
@@ -272,15 +272,15 @@ Respond helpfully and stay in character. Keep responses concise but meaningful (
       const faithChannels = this.client.channels.cache.filter(
         channel => channel.name?.toLowerCase() === 'faith' && channel.type === 0
       );
-      
+
       if (faithChannels.size === 0) return;
 
       // Always include owner for faith check-ins, plus other active users
       const usersToCheck = new Set();
-      
+
       // Always add owner if they have interacted with faith channels
       usersToCheck.add(OWNER_ID);
-      
+
       // Add other users who haven't been checked recently
       Array.from(faithCheckData.entries())
         .filter(([userId, data]) => {
@@ -311,19 +311,19 @@ Respond helpfully and stay in character. Keep responses concise but meaningful (
 
       const randomMessage = personality.checkMessages[Math.floor(Math.random() * personality.checkMessages.length)];
       const personalizedMessage = `${user}, ${randomMessage} ${personality.emoji}`;
-      
+
       const embed = new EmbedBuilder()
         .setColor(personality.color)
-        .setAuthor({ 
-          name: personality.name, 
-          iconURL: this.client.user.displayAvatarURL() 
+        .setAuthor({
+          name: personality.name,
+          iconURL: this.client.user.displayAvatarURL()
         })
         .setDescription(`${personality.emoji} ${personalizedMessage}`)
         .setFooter({ text: `Autonomous ${channelName} check-in • Your engagement matters!` })
         .setTimestamp();
 
       await channel.send({ embeds: [embed] });
-      
+
       // Update user data for this channel
       const channelData = this.getChannelUserData(channelName);
       const userData = channelData.get(userId) || {};
@@ -357,7 +357,7 @@ Respond helpfully and stay in character. Keep responses concise but meaningful (
   // Method to get all channel stats (for owner command and top performers)
   getAllChannelStats() {
     const stats = {};
-    
+
     for (const channelName of ['faith', 'health', 'wealth', 'daily-checkins']) {
       const channelData = this.getChannelUserData(channelName);
       stats[channelName] = {
@@ -373,25 +373,25 @@ Respond helpfully and stay in character. Keep responses concise but meaningful (
         )
       };
     }
-    
+
     return stats;
   }
 
   // Get top performers across all channels
   getTopPerformers(limit = 10) {
     const performers = new Map();
-    
+
     // Weight factors (faith and wealth get higher priority as requested)
     const weights = {
       faith: 3.0,      // Highest priority
-      wealth: 2.5,     // High priority  
+      wealth: 2.5,     // High priority
       health: 2.0,     // Medium-high priority
       'daily-checkins': 1.5  // Base priority
     };
-    
+
     for (const [channelName, weight] of Object.entries(weights)) {
       const channelData = this.getChannelUserData(channelName);
-      
+
       for (const [userId, userData] of channelData.entries()) {
         if (!performers.has(userId)) {
           performers.set(userId, {
@@ -401,12 +401,12 @@ Respond helpfully and stay in character. Keep responses concise but meaningful (
             lastActivity: 0
           });
         }
-        
+
         const performer = performers.get(userId);
         const responses = userData.responseCount || 0;
         const checkins = userData.checkCount || 0;
         const channelScore = (responses * 2 + checkins) * weight;
-        
+
         performer.totalScore += channelScore;
         performer.channels[channelName] = {
           responses,
@@ -417,7 +417,7 @@ Respond helpfully and stay in character. Keep responses concise but meaningful (
         performer.lastActivity = Math.max(performer.lastActivity, userData.lastActivity || 0);
       }
     }
-    
+
     return Array.from(performers.values())
       .sort((a, b) => b.totalScore - a.totalScore)
       .slice(0, limit);

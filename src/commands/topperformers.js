@@ -11,7 +11,7 @@ export default {
       }
 
       const { EmbedBuilder } = await import('discord.js');
-      
+
       if (!globalThis.channelPersonalities) {
         return message.reply('❌ Channel personalities system not initialized.');
       }
@@ -34,29 +34,29 @@ export default {
       // Add top performers
       let leaderboard = '';
       const medals = ['🥇', '🥈', '🥉'];
-      
+
       for (let i = 0; i < Math.min(topPerformers.length, 10); i++) {
         const performer = topPerformers[i];
         const medal = medals[i] || `${i + 1}.`;
-        
+
         try {
           const user = await message.client.users.fetch(performer.userId);
           const userName = user ? user.displayName || user.username : `User ${performer.userId}`;
-          
+
           // Calculate days since last activity
           const daysSinceActivity = Math.floor((Date.now() - performer.lastActivity) / (24 * 60 * 60 * 1000));
-          const activityStatus = daysSinceActivity === 0 ? '🟢 Active today' : 
-                                daysSinceActivity <= 3 ? `🟡 ${daysSinceActivity}d ago` : 
+          const activityStatus = daysSinceActivity === 0 ? '🟢 Active today' :
+                                daysSinceActivity <= 3 ? `🟡 ${daysSinceActivity}d ago` :
                                 `🔴 ${daysSinceActivity}d ago`;
-          
+
           leaderboard += `${medal} **${userName}** (${Math.round(performer.totalScore)} pts) ${activityStatus}\n`;
-          
+
           // Add channel breakdown for top 3
           if (i < 3) {
             const channels = [];
             for (const [channelName, data] of Object.entries(performer.channels)) {
               if (data.responses > 0 || data.checkins > 0) {
-                const channelEmoji = channelName === 'faith' ? '🙏' : 
+                const channelEmoji = channelName === 'faith' ? '🙏' :
                                    channelName === 'health' ? '💪' :
                                    channelName === 'wealth' ? '💰' : '📅';
                 channels.push(`${channelEmoji} ${data.responses + data.checkins}`);
@@ -83,11 +83,11 @@ export default {
 
       const channelStats = [];
       const channelEmojis = { faith: '🙏', health: '💪', wealth: '💰', 'daily-checkins': '📅' };
-      
+
       for (const [channelName, stats] of Object.entries(allStats)) {
         const emoji = channelEmojis[channelName];
         const displayName = channelName.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase());
-        
+
         channelStats.push({
           name: `${emoji} ${displayName}`,
           value: `👥 ${stats.totalUsers} users\n💬 ${stats.totalResponses} responses\n✅ ${stats.totalCheckins} check-ins\n🔥 ${stats.activeUsers} active (7d)`,
@@ -109,15 +109,15 @@ export default {
           .setDescription('Individual channel performance for top performers');
 
         let detailedBreakdown = '';
-        
+
         for (let i = 0; i < Math.min(topPerformers.length, 5); i++) {
           const performer = topPerformers[i];
           try {
             const user = await message.client.users.fetch(performer.userId);
             const userName = user ? user.displayName || user.username : `User ${performer.userId}`;
-            
+
             detailedBreakdown += `**${i + 1}. ${userName}** (Total: ${Math.round(performer.totalScore)} pts)\n`;
-            
+
             for (const [channelName, data] of Object.entries(performer.channels)) {
               if (data.responses > 0 || data.checkins > 0) {
                 const emoji = channelEmojis[channelName];

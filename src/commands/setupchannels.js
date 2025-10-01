@@ -11,7 +11,7 @@ export default {
       }
 
       const { EmbedBuilder, ChannelType, PermissionFlagsBits } = await import('discord.js');
-      
+
       const guild = message.guild;
       if (!guild) {
         return message.reply('❌ This command must be used in a server.');
@@ -88,14 +88,14 @@ export default {
 
           // Send welcome message to the new channel
           const welcomeEmbed = new EmbedBuilder()
-            .setColor(channelInfo.name === 'faith' ? 0x8B4513 : 
+            .setColor(channelInfo.name === 'faith' ? 0x8B4513 :
                      channelInfo.name === 'health' ? 0xFF6B6B :
                      channelInfo.name === 'wealth' ? 0xFFD700 : 0x9B59B6)
             .setTitle(`Welcome to #${channelInfo.name}!`)
             .setDescription(`${channelInfo.description}\n\n${channelInfo.topic}`)
             .addFields(
-              { 
-                name: '🤖 AI Personality', 
+              {
+                name: '🤖 AI Personality',
                 value: channelInfo.name === 'faith' ? 'Faith Guardian - Will autonomously check on your spiritual journey' :
                        channelInfo.name === 'health' ? 'Health Coach - Provides fitness and wellness support' :
                        channelInfo.name === 'wealth' ? 'Wealth Advisor - Offers financial guidance' :
@@ -125,9 +125,9 @@ export default {
         .setTitle('🎯 Channel Setup Results')
         .setDescription(results.join('\n'))
         .addFields(
-          { 
-            name: '📊 Summary', 
-            value: `${createdChannels.length}/${channelsToCreate.length} channels ready` 
+          {
+            name: '📊 Summary',
+            value: `${createdChannels.length}/${channelsToCreate.length} channels ready`
           },
           {
             name: '🤖 AI Personalities',

@@ -11,7 +11,7 @@ export default {
       }
 
       const { EmbedBuilder } = await import('discord.js');
-      
+
       // Run comprehensive user experience test
       const embed = new EmbedBuilder()
         .setColor(0x00AE86)
@@ -23,7 +23,7 @@ export default {
 
       // Test all major systems
       const testResults = [];
-      
+
       // 1. Test Command System
       try {
         const commands = globalThis.commands || new Map();
@@ -105,7 +105,7 @@ export default {
       if (args[0] === 'simulate' || args[0] === 'real') {
         testResults.push('🎮 Running REAL user simulation test...');
         await message.channel.send('🎮 **REAL USER SIMULATION STARTING**\nSimulating actual users going through all bot features...');
-        
+
         try {
           const simulationResults = await this.runRealUserSimulation(message);
           testResults.push(`✅ Real Simulation: ${simulationResults.success}/${simulationResults.total} scenarios passed`);
@@ -147,7 +147,7 @@ export default {
 
   async runRealUserSimulation(message) {
     const { EmbedBuilder } = await import('discord.js');
-    
+
     // Real user personas with actual Discord-like behavior
     const realUsers = [
       {
@@ -164,7 +164,7 @@ export default {
                 await message.channel.send(`🎭 Sarah faith test: ${typeof content === 'object' ? 'AI responded with embed' : content}`);
               }
             };
-            
+
             if (globalThis.channelPersonalities) {
               await globalThis.channelPersonalities.handleChannelMessage(testMessage, {
                 name: 'Faith Guardian',
@@ -174,13 +174,13 @@ export default {
               });
             }
           }
-          
+
           // Test basic commands
           const commands = globalThis.commands || new Map();
           if (commands.has('help')) {
             await commands.get('help').execute(message, []);
           }
-          
+
           return true;
         }
       },
@@ -198,7 +198,7 @@ export default {
                 await message.channel.send(`🎭 Mike health test: ${typeof content === 'object' ? 'AI responded with embed' : content}`);
               }
             };
-            
+
             if (globalThis.channelPersonalities) {
               await globalThis.channelPersonalities.handleChannelMessage(testMessage, {
                 name: 'Health Coach',
@@ -208,7 +208,7 @@ export default {
               });
             }
           }
-          
+
           // Test fitness tracking
           const commands = globalThis.commands || new Map();
           if (commands.has('track')) {
@@ -221,7 +221,7 @@ export default {
             };
             await commands.get('track').execute(mockMessage, ['yes']);
           }
-          
+
           return true;
         }
       },
@@ -239,7 +239,7 @@ export default {
                 await message.channel.send(`🎭 Alex wealth test: ${typeof content === 'object' ? 'AI responded with embed' : content}`);
               }
             };
-            
+
             if (globalThis.channelPersonalities) {
               await globalThis.channelPersonalities.handleChannelMessage(testMessage, {
                 name: 'Wealth Advisor',
@@ -249,7 +249,7 @@ export default {
               });
             }
           }
-          
+
           // Test economy features
           const commands = globalThis.commands || new Map();
           if (commands.has('balance')) {
@@ -262,7 +262,7 @@ export default {
             };
             await commands.get('balance').execute(mockMessage, []);
           }
-          
+
           return true;
         }
       },
@@ -280,7 +280,7 @@ export default {
                 await message.channel.send(`🎭 Jordan daily test: ${typeof content === 'object' ? 'AI responded with embed' : content}`);
               }
             };
-            
+
             if (globalThis.channelPersonalities) {
               await globalThis.channelPersonalities.handleChannelMessage(testMessage, {
                 name: 'Daily Companion',
@@ -290,7 +290,7 @@ export default {
               });
             }
           }
-          
+
           // Test habit tracking
           const commands = globalThis.commands || new Map();
           if (commands.has('addhabit')) {
@@ -303,7 +303,7 @@ export default {
             };
             await commands.get('addhabit').execute(mockMessage, ['Daily', 'prayer', 'time']);
           }
-          
+
           return true;
         }
       }

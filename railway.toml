@@ -17,7 +17,7 @@ restartPolicyMaxRetries = 5
 [env]
 # Note: Set these in Railway dashboard, not here
 # DISCORD_TOKEN = "required"
-# OPENAI_API_KEY = "required" 
+# OPENAI_API_KEY = "required"
 # MONGO_URI = "required"
 # CLIENT_ID = "required"
 # GUILD_ID = "optional"

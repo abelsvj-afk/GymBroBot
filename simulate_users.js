@@ -20,14 +20,14 @@ const users = [
         goals: ["Track workouts", "Build habits", "Find motivation"]
     },
     {
-        name: "Mike - Returning Athlete", 
+        name: "Mike - Returning Athlete",
         id: "user_mike_456",
         journey: "Former athlete getting back into shape",
         goals: ["Advanced tracking", "Competitive features", "Find workout partner"]
     },
     {
         name: "Alex - Consistency Seeker",
-        id: "user_alex_789", 
+        id: "user_alex_789",
         journey: "Struggles with consistency, wants accountability",
         goals: ["Build streaks", "Daily check-ins", "Habit formation"]
     },
@@ -151,16 +151,16 @@ async function loadCommands() {
             console.log(`⚠️  Could not load command ${cmdName}: ${error.message}`);
         }
     }
-    
+
     return commands;
 }
 
 // Simulate user interaction with command
 async function simulateUserCommand(user, command, args, commandModule) {
     console.log(`\n👤 ${user.displayName} tries: !${command} ${args.join(' ')}`);
-    
+
     const mockMessage = createMockMessage(user, command, args);
-    
+
     try {
         if (commandModule && commandModule.execute) {
             await commandModule.execute(mockMessage, args);
@@ -180,12 +180,12 @@ async function simulateUserCommand(user, command, args, commandModule) {
 async function runUserSimulation() {
     console.log('Loading command modules...');
     const commands = await loadCommands();
-    
+
     console.log(`Loaded ${Object.keys(commands).length} command modules\n`);
-    
+
     let totalTests = 0;
     let successfulTests = 0;
-    
+
     // Simulate each user going through their journey
     for (const userData of users) {
         console.log(`\n${'='.repeat(60)}`);
@@ -193,35 +193,35 @@ async function runUserSimulation() {
         console.log(`Journey: ${userData.journey}`);
         console.log(`Goals: ${userData.goals.join(', ')}`);
         console.log(`${'='.repeat(60)}`);
-        
+
         const user = createMockUser(userData);
-        
+
         // Go through each step of the user journey
         for (const [category, steps] of Object.entries(userJourneySteps)) {
             console.log(`\n📂 ${category}:`);
             console.log(`   ${user.displayName} is exploring ${category.toLowerCase()}...`);
-            
+
             for (const step of steps) {
                 totalTests++;
                 const success = await simulateUserCommand(
-                    user, 
-                    step.command, 
-                    [], 
+                    user,
+                    step.command,
+                    [],
                     commands[step.command]
                 );
-                
+
                 if (success) successfulTests++;
-                
+
                 console.log(`   📝 ${step.description}`);
-                
+
                 // Simulate realistic user delays
                 await new Promise(resolve => setTimeout(resolve, 100));
             }
         }
-        
+
         console.log(`\n✨ ${user.displayName} completed their journey!`);
     }
-    
+
     // Summary
     console.log(`\n${'='.repeat(60)}`);
     console.log(`📊 SIMULATION SUMMARY`);
@@ -231,24 +231,24 @@ async function runUserSimulation() {
     console.log(`✅ Successful executions: ${successfulTests}`);
     console.log(`❌ Failed executions: ${totalTests - successfulTests}`);
     console.log(`📈 Success rate: ${((successfulTests / totalTests) * 100).toFixed(1)}%`);
-    
+
     // Command coverage
     console.log(`\n📋 Command Coverage:`);
     const allCommands = new Set();
     Object.values(userJourneySteps).forEach(steps => {
         steps.forEach(step => allCommands.add(step.command));
     });
-    
+
     console.log(`Commands tested: ${allCommands.size}`);
     console.log(`Available commands: ${Object.keys(commands).length}`);
-    
+
     const untested = Object.keys(commands).filter(cmd => !allCommands.has(cmd));
     if (untested.length > 0) {
         console.log(`⚠️  Untested commands: ${untested.join(', ')}`);
     }
-    
+
     console.log(`\n🎉 User simulation complete!`);
-    
+
     if (successfulTests === totalTests) {
         console.log(`🟢 All functions work perfectly from beginning to end!`);
     } else {
