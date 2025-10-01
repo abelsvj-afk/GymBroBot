@@ -1,11 +1,14 @@
-const _GBB_g = globalThis;
-const adminLog = _GBB_g.adminLog || (async () => {});
-const awardAchievement = _GBB_g.awardAchievement || (async () => false);
-const getOpenAIResponse = _GBB_g.getOpenAIResponse || (async () => '');
-const validateModel = _GBB_g.validateModel || (async () => ({ ok: false }));
-const saveWeekly = _GBB_g.saveWeekly || (async () => {});
-const saveHabits = _GBB_g.saveHabits || (async () => {});
-const saveMemory = _GBB_g.saveMemory || (async () => {});
+// check.js - clean version using helpers.exposed
+import helpers from '../helpers.js';
+
+const _ex = helpers.exposed || {};
+const adminLog = _ex.adminLog || globalThis.adminLog || (async () => {});
+const awardAchievement = _ex.awardAchievement || globalThis.awardAchievement || (async () => false);
+const getOpenAIResponse = _ex.getOpenAIResponse || globalThis.getOpenAIResponse || (async () => '');
+const validateModel = _ex.validateModel || globalThis.validateModel || (async () => ({ ok: false }));
+const saveWeekly = _ex.saveWeekly || globalThis.saveWeekly || (async () => {});
+const saveHabits = _ex.saveHabits || globalThis.saveHabits || (async () => {});
+const saveMemory = _ex.saveMemory || globalThis.saveMemory || (async () => {});
 
 export default {
   name: 'check',

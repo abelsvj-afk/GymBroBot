@@ -104,6 +104,8 @@ let slashNameMap = {};
 // ---------------- Save/Load Helpers ----------------
 // Storage-backed load/save helpers
 async function loadAllData() {
+  // Defensive: ensure challenges variable exists (some runtime edits previously caused a ReferenceError here)
+  if (typeof challenges === 'undefined') challenges = {};
   memory = await storage.load('memory', {});
   birthdays = await storage.load('birthdays', {});
   fitnessWeekly = await storage.load('weekly', {});
@@ -112,7 +114,9 @@ async function loadAllData() {
   partners = await storage.load('partners', {});
   strikes = await storage.load('strikes', {});
   habitTracker = await storage.load('habits', {});
-  challenges = await storage.load('challenges', {});
+  try {
+    challenges = await storage.load('challenges', {});
+  } catch (e) { console.error('loadAllData: failed to load challenges, using empty object', e); challenges = {}; }
   onboarding = await storage.load('onboarding', {});
   matches = await storage.load('matches', {});
   leaderboardPotential = await storage.load('leaderboard', {});
@@ -359,9 +363,27 @@ async function awardAchievement(guild, userId, achId) {
   } catch (e) { console.error('awardAchievement error', e); return false; }
 }
 
+import helpers from './src/helpers.js';
+
 // Expose commonly-used helpers and state on globalThis to maintain
 // backwards-compatibility for modules that reference these as globals.
 try {
+  // Helper: find admin/mod/logging channels in a guild
+  async function findAdminChannels(guild) {
+    try {
+      const lc = s => (s || '').toLowerCase();
+      const byExact = name => guild.channels.cache.find(ch => lc(ch.name) === name && ch.type === ChannelType.GuildText);
+      const byContains = name => guild.channels.cache.find(ch => lc(ch.name).includes(name) && ch.type === ChannelType.GuildText);
+      const channels = {};
+      channels.logging = byExact('logging') || byExact('log') || byContains('log') || null;
+      channels.admin = byExact('admin') || byContains('admin') || byContains('staff') || null;
+      channels.mod = byExact('mod') || byExact('moderator') || byContains('mod') || null;
+      if (!channels.logging && guild.systemChannel) channels.logging = guild.systemChannel;
+      if (!channels.admin && guild.systemChannel) channels.admin = guild.systemChannel;
+      if (!channels.mod && guild.systemChannel) channels.mod = guild.systemChannel;
+      return channels;
+    } catch (e) { return { logging: null, admin: null, mod: null }; }
+  }
   globalThis.adminLog = globalThis.adminLog || adminLog;
   globalThis.awardAchievement = globalThis.awardAchievement || awardAchievement;
   globalThis.saveWeekly = globalThis.saveWeekly || saveWeekly;
@@ -385,6 +407,41 @@ try {
   globalThis.matches = globalThis.matches || matches;
   globalThis.onboarding = globalThis.onboarding || onboarding;
   globalThis.messageCounts = globalThis.messageCounts || messageCounts;
+  // Expose helper to avoid ReferenceError during early command execution
+  try { globalThis.findAdminChannels = globalThis.findAdminChannels || findAdminChannels; } catch (e) {}
+  // Also register these helpers in the central helpers registry so modules
+  // can import a stable proxy instead of relying on globalThis ordering.
+  try {
+    helpers.register({
+      adminLog: globalThis.adminLog,
+      awardAchievement: globalThis.awardAchievement,
+      saveWeekly: globalThis.saveWeekly,
+      saveMemory: globalThis.saveMemory,
+      saveHabits: globalThis.saveHabits,
+      savePartnerQueue: globalThis.savePartnerQueue,
+      savePartners: globalThis.savePartners,
+      saveMatches: globalThis.saveMatches,
+      saveStrikes: globalThis.saveStrikes,
+      saveChallenges: globalThis.saveChallenges,
+      saveMonthly: globalThis.saveMonthly,
+      saveMessageCounts: globalThis.saveMessageCounts,
+      saveAchievements: globalThis.saveAchievements,
+      startOnboarding: globalThis.startOnboarding,
+      getOpenAIResponse: globalThis.getOpenAIResponse,
+      validateModel: globalThis.validateModel,
+      storage: globalThis.storage,
+      habitTracker: globalThis.habitTracker,
+      fitnessWeekly: globalThis.fitnessWeekly,
+      partnerQueue: globalThis.partnerQueue,
+      matches: globalThis.matches,
+      onboarding: globalThis.onboarding,
+      messageCounts: globalThis.messageCounts,
+      findAdminChannels: globalThis.findAdminChannels
+    });
+    // Also expose a stable proxy on globalThis for modules that prefer import
+    // rather than direct global access: `globalThis.helpers`.
+    try { globalThis.helpers = globalThis.helpers || helpers.exposed; } catch (e) {}
+  } catch (e) { console.error('Failed to register helpers into registry', e); }
 } catch (e) { console.error('Failed to expose globals for compatibility', e); }
 
 // Simple cooldown map for testai command (per-guild)
@@ -410,11 +467,6 @@ async function startupAiHealthCheck() {
       console.error('[OpenAI] Both primary and fallback model checks failed. AI features will return a polite error.');
     }
   } catch (e) { console.error('startupAiHealthCheck error:', e); }
-}
-    }
-
-    return "I can't respond right now.";
-  }
 }
 
 // Helper to persist an env var to the .env file in the repo root (simple key=value replacement or append)
@@ -1654,19 +1706,7 @@ async function loadCommandModules() {
   } catch (e) { console.error('loadCommandModules failed', e); }
 }
 
-// Minimal startup AI health check to avoid missing symbol on some edits
-async function startupAiHealthCheck() {
-  try {
-    // If runHealthCheck exists, we could execute a no-op call per guild; keep light-weight
-    if (typeof runHealthCheck === 'function') {
-      // don't block startup for long-running AI calls; run lightly
-      for (const guild of client.guilds.cache.values()) {
-        try { /* intentionally light: don't call heavy AI on startup */ } catch (e) {}
-      }
-    }
-  } catch (e) { console.error('startupAiHealthCheck error', e); }
-}
-
+// NOTE: startupAiHealthCheck is implemented above; do not redefine it here.
 // ---------------- Message Handler ----------------
 // Build and synchronize grouped slash commands from modulesMeta
 async function buildAndSyncSlashCommands(targetGuildId = null) {

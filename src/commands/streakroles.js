@@ -7,7 +7,7 @@ export default {
   slash: { group: 'economy', options: [] },
   async execute(context, message, args) {
     try {
-      const member = message.guild ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
+  const member = (message.guild && message.guild.members && typeof message.guild.members.fetch === 'function') ? await message.guild.members.fetch(message.author.id).catch(()=>null) : null;
       const isAdmin = member ? member.permissions.has(context.PermissionFlagsBits?.Administrator || 0) : false;
       const isOwner = process.env.BOT_OWNER_ID && message.author.id === process.env.BOT_OWNER_ID;
       if (!isAdmin && !isOwner) return message.reply('You must be a server Administrator or bot owner to manage streak roles.');

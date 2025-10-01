@@ -123,8 +123,8 @@ client.once('ready', async () => {
       let recent = [];
       try { recent = await ch.messages.fetch({ limit: 50 }); } catch(e) {}
       const startSnippet = content.slice(0, 120).trim();
-      const already = recent.find(m => m.author && m.author.id === client.user.id && ((m.content && m.content.slice(0,120).trim() === startSnippet) || (m.embeds && m.embeds.length && m.embeds[0].title && content.includes(m.embeds[0].title))));
-      if (already) { console.log('Skipping', file, '— already posted in', channelId, 'messageId=', already.id); continue; }
+  const alreadyPosted = recent.find(m => m.author && m.author.id === client.user.id && ((m.content && m.content.slice(0,120).trim() === startSnippet) || (m.embeds && m.embeds.length && m.embeds[0].title && content.includes(m.embeds[0].title))));
+  if (alreadyPosted) { console.log('Skipping', file, '— already posted in', channelId, 'messageId=', alreadyPosted.id); continue; }
 
       // Helper: split content into chunks no longer than maxLen, trying to split at double-newlines or newlines
       function chunkContent(text, maxLen = 1900) {
