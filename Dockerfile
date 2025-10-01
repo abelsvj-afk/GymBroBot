@@ -22,9 +22,9 @@ RUN apk add --no-cache curl bash
 # Make start script executable
 RUN chmod +x start.sh
 
-# Health check with proper port handling and longer startup time
-HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=5 \
+# Health check with shorter intervals for Railway
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
 
-# Start the bot using the startup script
-CMD ["./start.sh"]
+# Start the bot directly
+CMD ["node", "bot.js"]

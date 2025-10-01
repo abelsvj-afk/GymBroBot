@@ -280,11 +280,12 @@ async function startExpressServer(preferredPort = PORT, attempts = 5) {
       break;
     }
   }
-  throw new Error(`Unable to start Express server after ${attempts} attempts (starting at ${preferredPort})`);
+  console.error(`Unable to start Express server after ${attempts} attempts (starting at ${preferredPort})`);
+  return null; // Return null instead of throwing to prevent deployment loops
 }
 
-// Start now (fire-and-forget; errors will be logged)
-startExpressServer().catch(e => console.error(e));
+// Start now (fire-and-forget; errors will be logged but won't crash the bot)
+startExpressServer().catch(e => console.error('Express server failed to start:', e));
 
 // Lightweight debug endpoint to inspect runtime command mapping
 app.get('/debug', (req, res) => {

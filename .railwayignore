@@ -1,0 +1,16 @@
+# Railway ignore file
+# Ignore local development files and logs
+
+logs/
+*.log
+.env
+.env.local
+node_modules/
+debug-*
+*.tmp
+*.temp
+New Text Document.txt
+New folder/
+run_bot.ps1
+simulate_users.js
+user_experience_report.js
