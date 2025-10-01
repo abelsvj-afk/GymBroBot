@@ -411,11 +411,6 @@ async function startupAiHealthCheck() {
     }
   } catch (e) { console.error('startupAiHealthCheck error:', e); }
 }
-    }
-
-    return "I can't respond right now.";
-  }
-}
 
 // Helper to persist an env var to the .env file in the repo root (simple key=value replacement or append)
 async function persistEnvVar(key, value) {
@@ -1652,19 +1647,6 @@ async function loadCommandModules() {
     } catch (e) {}
     return;
   } catch (e) { console.error('loadCommandModules failed', e); }
-}
-
-// Minimal startup AI health check to avoid missing symbol on some edits
-async function startupAiHealthCheck() {
-  try {
-    // If runHealthCheck exists, we could execute a no-op call per guild; keep light-weight
-    if (typeof runHealthCheck === 'function') {
-      // don't block startup for long-running AI calls; run lightly
-      for (const guild of client.guilds.cache.values()) {
-        try { /* intentionally light: don't call heavy AI on startup */ } catch (e) {}
-      }
-    }
-  } catch (e) { console.error('startupAiHealthCheck error', e); }
 }
 
 // ---------------- Message Handler ----------------
